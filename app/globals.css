@@ -1461,3 +1461,10 @@ a:hover { color: var(--accent-hover); }
 .gap-next .swatch { width: 40px; height: 26px; border-radius: 4px; flex-shrink: 0; }
 .gap-name { font-size: 13.5px; font-weight: 600; color: var(--fg-0); }
 .gap-sub { font-size: 11.5px; color: var(--fg-2); margin-top: 2px; }
+
+/* Spend editor (Profile) */
+.spend-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.spend-cell { display: flex; align-items: center; gap: 6px; }
+.spend-cell .tag { flex: 1; }
+.spend-dollar { color: var(--fg-3); font-size: 13px; }
+.spend-cell .ce-input { width: 76px; text-align: right; }

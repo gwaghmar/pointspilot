@@ -427,7 +427,7 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
         {view === "chat" && <ChatView data={data} />}
         {view === "cards" && <CardsView data={data} setData={setData} />}
         {view === "discover" && <GapsView data={data} setData={setData} />}
-        {view === "profile" && <ProfileView data={data} />}
+        {view === "profile" && <ProfileView data={data} setData={setData} />}
       </div>
     </div>
   );
@@ -1239,7 +1239,7 @@ function GapCard({ gap, adding, onAdd }: { gap: Gap; adding: boolean; onAdd: () 
 
 /* ============================================================ Profile view */
 
-function ProfileView({ data }: { data: AppData }) {
+function ProfileView({ data, setData }: { data: AppData; setData: (d: AppData) => void }) {
   return (
     <div className="content">
       <div className="page">
@@ -1255,6 +1255,50 @@ function ProfileView({ data }: { data: AppData }) {
           <Row k="Home airport" v={data.profile.airport} mono />
           <Row k="Use cases" v={data.uses.join(", ")} />
         </div>
+
+        <SpendEditor data={data} setData={setData} />
+      </div>
+    </div>
+  );
+}
+
+/* Rough monthly spend per category. Stored as ANNUAL ($/mo × 12) in data.spend,
+ * which is what makes caps bind, net-value compare fairly, and "Get more"
+ * quantify gains in dollars. Optional — everything degrades gracefully without it. */
+function SpendEditor({ data, setData }: { data: AppData; setData: (d: AppData) => void }) {
+  const cats = data.uses.length
+    ? data.uses.map((u) => u.toLowerCase()).filter((c) => c !== "other")
+    : ["dining", "groceries", "travel", "gas"];
+
+  async function setMonthly(cat: string, monthly: number) {
+    const spend = { ...(data.spend || {}) };
+    if (monthly > 0) spend[cat] = Math.round(monthly * 12);
+    else delete spend[cat];
+    const next = { ...data, spend };
+    setData(next); await saveProfile(next);
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="bd-title" style={{ marginBottom: 4 }}>Monthly spend (optional)</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+        Powers cap-aware picks, fair net-value comparisons, and dollar gains in Get more.
+      </div>
+      <div className="spend-grid">
+        {cats.map((cat) => {
+          const annual = data.spend?.[cat] ?? 0;
+          return (
+            <label key={cat} className="spend-cell">
+              <span className="tag tag-cat" data-cat={cat}>{CAT_LABEL[cat] || cat}</span>
+              <span className="spend-dollar">$</span>
+              <input className="input ce-input" type="number" min={0} step={25}
+                placeholder="0"
+                value={annual ? Math.round(annual / 12) : ""}
+                onChange={(e) => setMonthly(cat, Number(e.target.value) || 0)} />
+              <span className="muted" style={{ fontSize: 11 }}>/mo</span>
+            </label>
+          );
+        })}
       </div>
     </div>
   );

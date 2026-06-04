@@ -61,7 +61,7 @@ The model never invents rates — it only reformats what the search returned, an
 
 ## How recommendations stay correct
 
-`lib/recommend.ts` does the ranking in plain math (multiplier × point value, plus trip-priority logic). **The AI supplies DATA; the code makes the DECISION.** That's why the recommendation is reliable.
+`lib/recommend.ts` does the ranking in plain math — cap-aware effective value, fee-aware net annual value, and fare-aware trip logic. **The AI supplies DATA and a recommendation; the USER makes the final call.** Every surface shows the full ranked field and the math behind it, so the recommendation is reliable *and* auditable. Merchant coding quirks (`lib/merchants.ts`) and the "what card should I get next" gap analyzer (`lib/gaps.ts` over a curated `lib/catalog.ts`) are deterministic too — the model never ranks.
 
 ---
 
@@ -75,9 +75,12 @@ app/
   globals.css
 lib/
   ai.ts                # client-side wrappers around /api/ai
-  recommend.ts         # deterministic ranking (rateFor, bestForCategory, bestForTrip)
+  recommend.ts         # deterministic ranking: cap/fee-aware value, ceiling, trip math
+  merchants.ts         # merchant -> category + coding-quirk caveats
+  catalog.ts           # curated candidate cards (for gap analysis)
+  gaps.ts              # "what card should I get next" (analyzeWallet)
+  reservations.ts      # pre-filled booking deep links + agent seam
   supabase.ts          # profile + cache I/O
-  seed.ts              # default card catalog
 supabase/
   schema.sql           # tables: profiles, card_cache
 .env.local.example     # copy to .env.local and fill in
