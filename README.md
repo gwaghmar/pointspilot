@@ -1,16 +1,24 @@
-# PointsPilot MVP — Vercel + Azure OpenAI + Tavily + Supabase
+# PointsPilot
 
-Stack decisions: Vercel host, Supabase for cache + profile, no auth yet,
-live reward data via web search. ~1 day.
+> Live, trustworthy credit-card reward lookups and recommendations — built in a day on **Next.js + OpenRouter + Tavily + Supabase + Vercel**.
+
+PointsPilot answers two questions:
+
+1. **"Which of my cards should I use for this purchase?"**
+2. **"Which card earns the most for my upcoming trip?"**
+
+The trick: an LLM by itself doesn't know *current* reward rates and will hallucinate them. PointsPilot fixes that by **searching the live web first, then asking the model to extract structured JSON from the search results** — and the *ranking* is done in plain TypeScript, not by the model. Every card surfaces its sources and an `asOf` date so you can verify.
+
+---
 
 ## Tech stack
 
 ```mermaid
 flowchart LR
     User([User]):::user --> Next[Next.js 14<br/>App Router<br/>React 18 + TS]:::frontend
-    Next -->|/api/ai| API[Server Route<br/>lib/ai.ts]:::api
+    Next -->|/api/ai| API[Server Route<br/>app/api/ai/route.ts]:::api
     API --> Tavily[Tavily<br/>Live Web Search]:::search
-    API --> Azure[Azure OpenAI<br/>gpt-4o-mini<br/>JSON extraction]:::ai
+    API --> LLM[OpenRouter<br/>gpt-4o-mini<br/>JSON extraction]:::ai
     API --> Supa[(Supabase<br/>Postgres cache<br/>+ profile)]:::db
     API --> Rec[lib/recommend.ts<br/>deterministic math]:::logic
     Rec --> Next
@@ -31,78 +39,131 @@ flowchart LR
 | Host | **Vercel** | Zero-config Next.js deploys, env vars, edge network |
 | Framework | **Next.js 14 (App Router)** | Server routes + React 18 in one repo |
 | Language | **TypeScript 5.6** | Typed contracts between AI JSON and UI |
-| AI | **Azure OpenAI — gpt-4o-mini** | Cheap structured extraction from search hits |
-| Search | **Tavily** | Live web rates, 1k free/mo |
+| AI gateway | **OpenRouter** (`openai/gpt-4o-mini`) | One key, swap models freely, low cost |
+| Search | **Tavily** | Live web rates — 1k free searches/mo |
 | Data | **Supabase (Postgres)** | 30-day card cache + user profile |
-| Logic | **lib/recommend.ts** | Plain math picks the winner — AI never decides |
+| Ranking | **lib/recommend.ts** | Plain math picks the winner — model never decides |
+
+---
 
 ## How reward data stays fresh and real
-Azure OpenAI can't browse on its own. So a card lookup is a 3-step server flow:
+
+The model can't browse on its own. So a card lookup is a 3-step server flow:
+
 ```
 user types "Amex Gold"
    -> Tavily searches the live web for current rates
-   -> Azure OpenAI extracts structured JSON FROM those results (not memory)
+   -> OpenRouter (gpt-4o-mini) extracts structured JSON FROM those results
    -> cached in Supabase for 30 days, with source links + an asOf date
 ```
-The model never makes up rates — it only reformats what the search returned,
-and every card shows its sources so you can verify.
+
+The model never invents rates — it only reformats what the search returned, and every card shows its sources.
 
 ## How recommendations stay correct
-`lib/recommend.ts` does the ranking in plain math (multiplier x point value,
-plus the trip-priority logic). The AI supplies DATA; the code makes the
-DECISION. That's why the recommendation is reliable.
+
+`lib/recommend.ts` does the ranking in plain math (multiplier × point value, plus trip-priority logic). **The AI supplies DATA; the code makes the DECISION.** That's why the recommendation is reliable.
 
 ---
 
-## 1. Azure OpenAI
-Portal: create an Azure OpenAI / Foundry resource, deploy `gpt-4o-mini`.
-Note endpoint, key, deployment name -> into `.env.local`.
+## Repo layout
 
-## 2. Tavily
-Sign up at tavily.com, grab the key (1,000 free searches/month). The 30-day
-Supabase cache means you rarely re-search the same card, so you stay in free tier.
+```
+app/
+  api/ai/route.ts      # server: Tavily search -> OpenRouter extract -> JSON
+  page.tsx             # client: onboarding + lookup + recommendations UI
+  layout.tsx
+  globals.css
+lib/
+  ai.ts                # client-side wrappers around /api/ai
+  recommend.ts         # deterministic ranking (rateFor, bestForCategory, bestForTrip)
+  supabase.ts          # profile + cache I/O
+  seed.ts              # default card catalog
+supabase/
+  schema.sql           # tables: profiles, card_cache
+.env.local.example     # copy to .env.local and fill in
+```
 
-## 3. Supabase
-Create a project. Open the SQL editor and run `supabase/schema.sql`.
-Copy the project URL, anon key, and service-role key into `.env.local`.
+---
 
-## 4. App
+## Quick start
+
+### 1. Clone & install
+
 ```bash
-npx create-next-app@latest pointspilot --ts --app --no-tailwind
+git clone https://github.com/gwaghmar/pointspilot.git
 cd pointspilot
-npm i openai @supabase/supabase-js
+npm install
 ```
-Then copy in from this kit:
-- `app/api/ai/route.ts`
-- `lib/ai.ts`, `lib/recommend.ts`, `lib/supabase.ts`
-- `.env.local.example` -> `.env.local` (fill it in)
 
-In your PointsPilot component (`app/page.tsx`, add `"use client";`):
-- delete the inline `aiClassify` / `aiCardLookup` / `normalize` / `rateFor`
-- `import { aiClassify, aiCardLookup } from "@/lib/ai";`
-- `import { bestForCategory, bestForTrip, rateFor } from "@/lib/recommend";`
-- load/save the profile so onboarding runs once:
-  ```ts
-  import { loadProfile, saveProfile } from "@/lib/supabase";
-  useEffect(() => { loadProfile().then(setData); }, []);
-  // in Onboarding onDone: saveProfile(payload); setData(payload);
-  ```
-- show `card.sources` and `card.asOf` somewhere on each card so freshness is visible.
+### 2. Provision the three services
 
-## 5. Run & deploy
+| Service | What to do | Free tier |
+|---|---|---|
+| **OpenRouter** ([keys](https://openrouter.ai/keys)) | Create an API key | Pay-per-token, gpt-4o-mini is ~cents |
+| **Tavily** ([tavily.com](https://tavily.com)) | Sign up, copy the API key | 1,000 searches/month |
+| **Supabase** ([supabase.com](https://supabase.com)) | New project → SQL editor → paste `supabase/schema.sql` → run | Generous free tier |
+
+### 3. Configure env
+
 ```bash
-npm run dev
-npx vercel    # add all env vars in Vercel project settings, then push
+cp .env.local.example .env.local
+# fill in all six values
+```
+
+```env
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
+OPENROUTER_REFERRER=http://localhost:3000
+
+TAVILY_API_KEY=tvly-...
+
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+SUPABASE_SERVICE_KEY=...
+```
+
+### 4. Run
+
+```bash
+npm run dev          # http://localhost:3000
+npm run typecheck    # tsc --noEmit
+npm run build        # production build
+```
+
+### 5. Deploy to Vercel
+
+```bash
+npx vercel           # links the project
+# then paste all env vars into Vercel project settings -> Environment Variables
+npx vercel --prod
 ```
 
 ---
 
-## Notes / honest limits
-- Reward extraction is only as good as the search results. Showing sources +
-  asOf lets users sanity-check; that's the right MVP posture.
-- `gpt-4o-mini` is cheap and fine for extraction. If accuracy matters more,
-  bump to a larger deployment for the cardLookup call only.
-- No auth = profiles are device-scoped and the tables are open. Lock down with
-  Supabase auth + RLS before any real launch.
-- Brave "Data for AI" is a solid Tavily alternative with configurable freshness
-  (24h / 7d / 30d) if you want tighter control over how recent results are.
+## API: `POST /api/ai`
+
+Single server route, two actions, never exposes provider keys to the client.
+
+| Action | Body | Returns |
+|---|---|---|
+| `classify` | `{ action: "classify", merchant: "Whole Foods" }` | `{ category: "grocery", confidence: 0.93 }` |
+| `cardLookup` | `{ action: "cardLookup", cardName: "Amex Gold" }` | `{ name, network, categories[], sources[], asOf }` |
+
+Results from `cardLookup` are cached in Supabase `card_cache` for 30 days keyed by normalized card name.
+
+---
+
+## Honest limits
+
+- Reward extraction is only as good as the search results. Showing `sources` + `asOf` lets users sanity-check — that's the right MVP posture, not a substitute for real verification.
+- `gpt-4o-mini` is cheap and good enough for extraction. Bump to a larger model on the `cardLookup` call alone if accuracy matters more than cost.
+- **No auth yet** — profiles are device-scoped and the Supabase tables are open. Add Supabase Auth + RLS before any real launch.
+- Tavily's free tier is the gate. The 30-day cache means a typical user costs <10 searches/month.
+- Brave "Data for AI" is a solid Tavily alternative with configurable freshness (24h / 7d / 30d) if you want tighter recency control.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
