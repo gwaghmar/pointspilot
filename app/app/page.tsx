@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { aiClassify, aiCardLookup, aiAnalyze } from "@/lib/ai";
+import { aiClassify, aiCardLookup, aiAnalyze, aiNearby, type NearbyPlace, type NearbyResult } from "@/lib/ai";
 import { bestForCategory, bestForTrip, rateFor, ceilingFor, type Card } from "@/lib/recommend";
 import { resolveMerchant } from "@/lib/merchants";
+import { buildReservationUrl } from "@/lib/reservations";
 import { loadProfile, saveProfile } from "@/lib/supabase";
 
 type Profile = { name: string; email: string; phone: string; address: string; airport: string };
@@ -861,6 +862,141 @@ function TripResult({ trip, data }: { trip: Trip; data: AppData }) {
       </a>
       <div className="footer-note">
         Route, dates, travelers & cabin go in the URL. Bag ({trip.bag || "?"}), seat ({trip.seat || "?"}), loyalty ({trip.loyalty || "?"}), and login-only fields need a browser agent.
+      </div>
+
+      {trip.to && <NearbyRewards trip={trip} data={data} />}
+    </div>
+  );
+}
+
+/* ============================================================ Nearby rewards */
+
+/* A trip is more than the flight: dining, hotels, shopping and attractions all
+ * earn. We search the destination once, then for each place pick the user's
+ * best card deterministically and offer a pre-filled reservation for dining. */
+function NearbyRewards({ trip, data }: { trip: Trip; data: AppData }) {
+  const dest = trip.to || "";
+  const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [result, setResult] = useState<NearbyResult | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!dest) return;
+    setState("loading");
+    aiNearby(dest)
+      .then((r) => { if (alive) { setResult(r); setState(r.places.length ? "done" : "error"); } })
+      .catch(() => { if (alive) setState("error"); });
+    return () => { alive = false; };
+  }, [dest]);
+
+  return (
+    <div className="nearby">
+      <div className="divider" />
+      <div className="nearby-head">
+        <span className="tag tag-cat" data-cat="travel">At your destination</span>
+        <span className="muted" style={{ fontSize: 12 }}>where to spend in {dest}</span>
+      </div>
+
+      {state === "loading" && (
+        <div className="nearby-loading"><span className="spinner" /> Finding the best places to earn in {dest}…</div>
+      )}
+      {state === "error" && (
+        <div className="muted" style={{ fontSize: 12.5 }}>Couldn’t pull nearby spots for {dest} right now — the flight handoff above still works.</div>
+      )}
+      {state === "done" && result && (
+        <div className="nearby-list">
+          {result.places.map((p, i) => (
+            <NearbyPlaceCard key={p.name + i} place={p} trip={trip} data={data} />
+          ))}
+          {result.sources && result.sources.length > 0 && (
+            <div className="sources" style={{ marginTop: 4 }}>
+              {result.asOf && <span className="muted" style={{ fontSize: 11 }}>asOf {result.asOf}</span>}
+              {result.sources.slice(0, 2).map((s, i) => (
+                <a key={i} href={s.url} target="_blank" rel="noreferrer">source {i + 1}</a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NearbyPlaceCard({ place, trip, data }: { place: NearbyPlace; trip: Trip; data: AppData }) {
+  const [booking, setBooking] = useState(false);
+  const ranked = bestForCategory(data.cards, place.category);
+  const pick = ranked[0];
+  const rate = pick ? rateFor(pick, place.category) : 0;
+  const valuePct = pick ? rate * pick.cpp : 0;
+
+  return (
+    <div className="np">
+      <div className="np-main">
+        <div className="np-info">
+          <div className="np-name">
+            {place.name}
+            <span className="np-kind">{place.kind}</span>
+          </div>
+          {(place.area || place.blurb) && (
+            <div className="np-sub">{[place.area, place.blurb].filter(Boolean).join(" · ")}</div>
+          )}
+          {pick ? (
+            <div className="np-card">
+              Use <b>{pick.name}</b> · <span className="mono">{rate.toFixed(1)}×</span>
+              <span className="np-val mono"> {valuePct.toFixed(2)}% back</span>
+            </div>
+          ) : (
+            <div className="np-card muted">Add a card to see the best pick here.</div>
+          )}
+        </div>
+        {place.reservable && (
+          <button className="btn btn-ghost np-reserve" onClick={() => setBooking((v) => !v)}>
+            {booking ? "Close" : "Reserve"}
+          </button>
+        )}
+      </div>
+      {booking && place.reservable && (
+        <ReservationPicker place={place} trip={trip} />
+      )}
+    </div>
+  );
+}
+
+/* Pre-fills a reservation handoff (restaurant, date, time, party). The "Open"
+ * link carries it all; auto-confirm is the agent seam in lib/reservations.ts. */
+function ReservationPicker({ place, trip }: { place: NearbyPlace; trip: Trip }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [date, setDate] = useState(today);
+  const [time, setTime] = useState("19:00");
+  const [party, setParty] = useState(Number((trip.travelers || "2").replace("+", "")) || 2);
+
+  const { url, provider } = buildReservationUrl({
+    place: place.name, city: trip.to, area: place.area, date, time, party,
+  });
+
+  return (
+    <div className="resv">
+      <div className="resv-fields">
+        <label className="resv-f">
+          <span>Date</span>
+          <input className="input ce-input" type="date" value={date} min={today} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label className="resv-f">
+          <span>Time</span>
+          <input className="input ce-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </label>
+        <label className="resv-f">
+          <span>Party</span>
+          <select className="input ce-input" value={party} onChange={(e) => setParty(Number(e.target.value))}>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+      </div>
+      <a className="btn btn-primary btn-lg" href={url} target="_blank" rel="noreferrer">
+        Open in {provider} — pre-filled →
+      </a>
+      <div className="footer-note">
+        {place.name} · {date} at {time} for {party}. One tap to confirm; auto-booking arrives with the browser agent.
       </div>
     </div>
   );

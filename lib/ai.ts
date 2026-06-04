@@ -83,3 +83,36 @@ export async function aiSpendExtract(text: string): Promise<{ amount?: number | 
   try { return await call("spendExtract", text); }
   catch { return {}; }
 }
+
+export type NearbyPlace = {
+  name: string;
+  kind: string;                 // Restaurant | Shopping | Attraction | Hotel | Nightlife
+  category: string;             // reward category: dining | travel | online | other
+  reservable?: boolean;
+  area?: string;
+  blurb?: string;
+};
+export type NearbyResult = { destination: string; places: NearbyPlace[]; sources?: { title: string; url: string }[]; asOf?: string };
+
+const NEARBY_CATS = new Set(["dining", "travel", "online", "other"]);
+
+export async function aiNearby(destination: string): Promise<NearbyResult> {
+  try {
+    const d = await call("nearby", destination);
+    const places: NearbyPlace[] = Array.isArray(d.places)
+      ? d.places
+          .filter((p: any) => p && typeof p.name === "string" && p.name.trim())
+          .map((p: any) => ({
+            name: String(p.name).trim(),
+            kind: typeof p.kind === "string" ? p.kind : "Place",
+            category: NEARBY_CATS.has(p.category) ? p.category : "other",
+            reservable: !!p.reservable,
+            area: typeof p.area === "string" ? p.area : undefined,
+            blurb: typeof p.blurb === "string" ? p.blurb : undefined,
+          }))
+      : [];
+    return { destination: d.destination || destination, places, sources: d.sources || [], asOf: d.asOf };
+  } catch {
+    return { destination, places: [] };
+  }
+}

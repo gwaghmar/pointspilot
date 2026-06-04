@@ -134,6 +134,55 @@ Respond ONLY as JSON:
   return payload;
 }
 
+/* ---- nearby: destination-aware places to spend, grouped by reward category.
+ * One live search (frugal), LLM only STRUCTURES the results, cached 30 days.
+ * The reward decision still happens in deterministic code on the client. */
+async function nearby(destination: string) {
+  const dest = destination.trim();
+  if (!dest) return { destination: "", places: [] };
+  const k = `nearby:${keyOf(dest)}`;
+
+  if (supa) {
+    const { data } = await supa.from("card_cache").select("*").eq("key", k).maybeSingle();
+    if (data) {
+      const ageDays = (Date.now() - new Date(data.fetched_at).getTime()) / 86400000;
+      if (ageDays < CACHE_DAYS) return { ...data.payload, cached: true };
+    }
+  }
+
+  const search = await webSearch(`best restaurants, shopping and attractions for visitors in ${dest}`);
+  const context = (search.results || [])
+    .map((r) => `SOURCE: ${r.title} (${r.url})\n${r.content}`)
+    .join("\n\n---\n\n");
+  const sources = (search.results || []).slice(0, 4).map((r) => ({ title: r.title, url: r.url }));
+
+  const c = await ai().chat.completions.create({
+    model: DEPLOYMENT,
+    response_format: { type: "json_object" },
+    temperature: 0,
+    max_tokens: 800,
+    messages: [{
+      role: "user",
+      content: `Using ONLY the web results below, list up to 8 notable places a traveler to "${dest}" would actually spend at. Do not invent places.
+- "kind" = one of: Restaurant, Shopping, Attraction, Hotel, Nightlife.
+- "category" = the credit-card reward category the purchase codes as: "dining" (restaurants/bars/cafes), "travel" (hotels, tours, attractions, transit), "online" (retail/shopping), or "other".
+- "reservable" = true only for Restaurants/Nightlife where a table booking makes sense.
+- "area" = neighborhood or short locator, if stated. "blurb" = <= 12 words.
+
+WEB RESULTS:
+${context || "(no results found)"}
+
+Respond ONLY as JSON:
+{"places":[{"name":"","kind":"Restaurant","category":"dining","reservable":true,"area":"","blurb":""}]}`,
+    }],
+  });
+  const parsed = JSON.parse(c.choices[0]?.message?.content || "{}");
+  const payload = { destination: dest, places: Array.isArray(parsed.places) ? parsed.places.slice(0, 8) : [], sources, asOf: new Date().toISOString().slice(0, 10) };
+
+  if (supa) await supa.from("card_cache").upsert({ key: k, payload, fetched_at: new Date().toISOString() });
+  return payload;
+}
+
 /* ---- unified analyzer: intent + trip fields + spend in ONE call ---- */
 async function analyze(text: string, inTrip: boolean) {
   const c = await ai().chat.completions.create({
@@ -240,6 +289,7 @@ export async function POST(req: NextRequest) {
     if (mode === "tripExtract") return NextResponse.json(await tripExtract(text));
     if (mode === "spendExtract")return NextResponse.json(await spendExtract(text));
     if (mode === "analyze")     return NextResponse.json(await analyze(text, !!inTrip));
+    if (mode === "nearby")      return NextResponse.json(await nearby(text));
     return NextResponse.json({ error: "unknown mode" }, { status: 400 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
