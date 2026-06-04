@@ -95,11 +95,13 @@ async function cardLookup(query: string) {
     model: DEPLOYMENT,
     response_format: { type: "json_object" },
     temperature: 0,
-    max_tokens: 700,
+    max_tokens: 800,
     messages: [{
       role: "user",
       content: `Using ONLY the web results below, extract the current reward profile for the card the user named.
 - If a multiplier isn't stated, use 1. Do not invent rates.
+- "annualFee" = the card's annual fee in US dollars (0 if no annual fee / "$0").
+- "caps" = for any category whose bonus rate ONLY applies up to an annual spending limit, give {"limit": dollars-per-year, "postRate": multiplier-after-the-cap}. Example: Amex Gold 4x groceries up to $25,000/yr then 1x -> "groceries":{"limit":25000,"postRate":1}. Omit categories with no cap. Only include caps actually stated in the sources.
 - "perks" = up to 5 short bullets (≤ 10 words each) describing concrete benefits: monthly/annual credits, free subscriptions (DashPass, Uber One, Walmart+, ShopRunner, etc.), lounge access, travel insurance, statement credits, anniversary points. Only include perks actually stated in the sources.
 - "offer" = current welcome / signup bonus if stated (e.g. "90,000 pts after $6k spend in 6 months"), else null.
 - "redemptions" = up to 3 short bullets describing notable redemption sweet spots (transfer partners, travel portal multipliers), only if mentioned.
@@ -114,7 +116,9 @@ Respond ONLY as JSON:
   "issuer": "",
   "currency": "",
   "cpp": 1.0,
+  "annualFee": 0,
   "rewards": {"dining":0,"travel":0,"streaming":0,"groceries":0,"gas":0,"online":0,"other":0},
+  "caps": {},
   "note": "one short line",
   "perks": [],
   "offer": null,

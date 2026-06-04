@@ -38,19 +38,34 @@ export async function aiClassify(text: string) {
   catch { return { category: kwClass(text), summary: text.slice(0, 40) }; }
 }
 
+/* Keep only well-formed {limit, postRate} cap entries. */
+function normCaps(raw: any): Record<string, { limit: number; postRate: number }> {
+  const out: Record<string, { limit: number; postRate: number }> = {};
+  if (raw && typeof raw === "object") {
+    for (const [cat, v] of Object.entries<any>(raw)) {
+      const limit = Number(v?.limit);
+      if (limit > 0) out[cat] = { limit, postRate: Number(v?.postRate) || 1 };
+    }
+  }
+  return out;
+}
+
 export function normalize(obj: any) {
   return {
     id: (obj.issuer + obj.name + Math.random()).slice(0, 18),
     name: obj.name, issuer: obj.issuer,
     cur: obj.currency || obj.cur || "Points",
     cpp: obj.cpp || 1, color: hashColor(obj.name || "x"), points: 0,
+    annualFee: Number(obj.annualFee) >= 0 ? Number(obj.annualFee) || 0 : 0,
     r: { dining:1, travel:1, streaming:1, groceries:1, gas:1, online:1, other:1, ...(obj.rewards || obj.r || {}) },
+    caps: normCaps(obj.caps),
     note: obj.note || "",
     sources: obj.sources || [],   // [{title,url}] — show these in the UI
     asOf: obj.asOf || null,       // date the rates were pulled
     perks: Array.isArray(obj.perks) ? obj.perks.filter((p: any) => typeof p === "string" && p.trim()) : [],
     offer: obj.offer || null,
     redemptions: Array.isArray(obj.redemptions) ? obj.redemptions.filter((p: any) => typeof p === "string" && p.trim()) : [],
+    edited: false,
   };
 }
 
