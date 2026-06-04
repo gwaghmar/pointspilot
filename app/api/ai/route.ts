@@ -95,16 +95,31 @@ async function cardLookup(query: string) {
     model: DEPLOYMENT,
     response_format: { type: "json_object" },
     temperature: 0,
-    max_tokens: 500,
+    max_tokens: 700,
     messages: [{
       role: "user",
-      content: `Using ONLY the web results below, extract current reward multipliers for the card the user named. If a category isn't stated, use 1. Do not invent rates.
+      content: `Using ONLY the web results below, extract the current reward profile for the card the user named.
+- If a multiplier isn't stated, use 1. Do not invent rates.
+- "perks" = up to 5 short bullets (≤ 10 words each) describing concrete benefits: monthly/annual credits, free subscriptions (DashPass, Uber One, Walmart+, ShopRunner, etc.), lounge access, travel insurance, statement credits, anniversary points. Only include perks actually stated in the sources.
+- "offer" = current welcome / signup bonus if stated (e.g. "90,000 pts after $6k spend in 6 months"), else null.
+- "redemptions" = up to 3 short bullets describing notable redemption sweet spots (transfer partners, travel portal multipliers), only if mentioned.
+
 CARD: "${query}"
 WEB RESULTS:
 ${context || "(no results found)"}
 
 Respond ONLY as JSON:
-{"name":"","issuer":"","currency":"","cpp":1.0,"rewards":{"dining":0,"travel":0,"streaming":0,"groceries":0,"gas":0,"online":0,"other":0},"note":"one short line"}`,
+{
+  "name": "",
+  "issuer": "",
+  "currency": "",
+  "cpp": 1.0,
+  "rewards": {"dining":0,"travel":0,"streaming":0,"groceries":0,"gas":0,"online":0,"other":0},
+  "note": "one short line",
+  "perks": [],
+  "offer": null,
+  "redemptions": []
+}`,
     }],
   });
   const payload = { ...JSON.parse(c.choices[0]?.message?.content || "{}"), sources, asOf: new Date().toISOString().slice(0, 10) };
@@ -113,6 +128,50 @@ Respond ONLY as JSON:
   if (supa) await supa.from("card_cache").upsert({ key: k, payload, fetched_at: new Date().toISOString() });
 
   return payload;
+}
+
+/* ---- unified analyzer: intent + trip fields + spend in ONE call ---- */
+async function analyze(text: string, inTrip: boolean) {
+  const c = await ai().chat.completions.create({
+    model: DEPLOYMENT,
+    response_format: { type: "json_object" },
+    temperature: 0,
+    max_tokens: 400,
+    messages: [{
+      role: "user",
+      content: `You're a credit-card concierge. The user said: "${text}"
+${inTrip ? "(They are currently mid-flight in a trip-booking dialog. Treat their message as either an answer to the next question or a richer description of the trip.)" : ""}
+
+Return a single JSON object. Always include "intent". Include any other field ONLY if the user clearly stated it.
+
+Schema:
+{
+  "intent": "travel" | "groceries" | "dining" | "streaming" | "gas" | "online" | "other",
+  "summary": "4-6 word summary of what they want",
+  // Travel fields (omit any not stated):
+  "to": "city or airport code",
+  "from": "city or airport code",
+  "dates": "their phrasing",
+  "rt": "round" | "one",
+  "travelers": "1" | "2" | "3" | "4+",
+  "cabin": "Basic" | "Economy" | "Business" | "First",
+  "bag": "yes" | "no",
+  "seat": "yes" | "no",
+  "time": "Morning" | "Afternoon" | "Evening" | "No preference",
+  "loyalty": "program name or none",
+  "priority": "Spend the least cash" | "Rack up the most points" | "Redeem existing points",
+  // Non-travel fields:
+  "amount": number-in-dollars,
+  "merchantQuery": "search term"
+}
+
+Examples:
+"book a one-way to LAX next Fri in business, no bag" -> {"intent":"travel","summary":"flight to LAX","to":"LAX","rt":"one","dates":"next Friday","cabin":"Business","bag":"no"}
+"spend $200 at whole foods" -> {"intent":"groceries","summary":"$200 at Whole Foods","amount":200,"merchantQuery":"Whole Foods"}
+"netflix subscription" -> {"intent":"streaming","summary":"Netflix subscription","merchantQuery":"Netflix subscription"}`,
+    }],
+  });
+  return JSON.parse(c.choices[0]?.message?.content || "{}");
 }
 
 /* ---- natural-language trip extractor ---- */
@@ -170,11 +229,13 @@ Example: "Weekly groceries" -> {"amount":null,"merchantQuery":"weekly groceries"
 
 export async function POST(req: NextRequest) {
   try {
-    const { mode, text } = await req.json();
+    const body = await req.json();
+    const { mode, text, inTrip } = body;
     if (mode === "classify")    return NextResponse.json(await classify(text));
     if (mode === "cardLookup")  return NextResponse.json(await cardLookup(text));
     if (mode === "tripExtract") return NextResponse.json(await tripExtract(text));
     if (mode === "spendExtract")return NextResponse.json(await spendExtract(text));
+    if (mode === "analyze")     return NextResponse.json(await analyze(text, !!inTrip));
     return NextResponse.json({ error: "unknown mode" }, { status: 400 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });

@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const EXAMPLES = [
-  { q: "Book a trip to Miami for 2 next weekend", a: "Use Capital One Venture X · 5× on flights · 9.25% effective value" },
-  { q: "Spend $250 at Whole Foods", a: "Use Amex Gold · 4× on groceries · earn 1,000 pts ≈ $20 · save +$15 vs 1× card" },
-  { q: "Weekly Netflix subscription",          a: "Use Sapphire Preferred · 3× on streaming · 3.75% back" },
-  { q: "Fill up the tank — $60 of gas",        a: "Use Freedom Unlimited · 1.5× · save +$0.45 vs default" },
-  { q: "Redeem points for a flight to Tokyo",   a: "Use Venture X · 71,225 miles ≈ $1,318 — most balance on hand" },
+  { q: "Book a trip to Miami for 2 next weekend", card: "Capital One Venture X", color: "#0e2a3e", body: "5× on flights",         tag: "9.25% back" },
+  { q: "Spend $250 at Whole Foods",                card: "Amex Gold",            color: "#b29469", body: "4× on groceries",       tag: "+$15 saved" },
+  { q: "Weekly Netflix subscription",              card: "Sapphire Preferred",   color: "#1a3a6e", body: "3× on streaming",       tag: "3.75% back" },
+  { q: "Fill up the tank — $60 of gas",            card: "Freedom Unlimited",    color: "#2c5e3a", body: "1.5× on everything",    tag: "+$0.45 saved" },
+  { q: "Redeem points for a flight to Tokyo",      card: "Venture X balance",    color: "#0e2a3e", body: "71,225 miles on hand",  tag: "≈ $1,318" },
 ];
 
 export default function Landing() {
@@ -27,7 +27,7 @@ export default function Landing() {
       <nav className="lp-nav">
         <Link href="/" className="lp-brand">
           <span className="lp-logo">P</span>
-          <span className="lp-brand-name">PointsPilot</span>
+          <span className="wordmark md">PointsPilot</span>
         </Link>
         <div className="lp-nav-links">
           <a href="#how">How it works</a>
@@ -61,10 +61,11 @@ export default function Landing() {
             <span className="lp-caret" />
           </div>
           <div className="lp-answer fade-key" key={idx}>
-            <div className="lp-answer-icon">
-              <span className="lp-logo small">P</span>
+            <div className="lp-answer-swatch" style={{ background: ex.color }} />
+            <div className="lp-answer-body">
+              Use <span className="card-name">{ex.card}</span> · {ex.body}
             </div>
-            <div className="lp-answer-body">{ex.a}</div>
+            <span className="lp-answer-tag">{ex.tag}</span>
           </div>
         </div>
 
@@ -155,7 +156,7 @@ export default function Landing() {
         <div className="lp-foot-inner">
           <div className="lp-foot-brand">
             <span className="lp-logo">P</span>
-            <span>PointsPilot</span>
+            <span className="wordmark sm">PointsPilot</span>
           </div>
           <div className="lp-foot-meta">
             <span>© {new Date().getFullYear()} PointsPilot</span>

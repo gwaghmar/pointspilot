@@ -17,15 +17,20 @@ const kwClass = (t: string) => {
   return "other";
 };
 
-async function call(mode: string, text: string) {
+async function call(mode: string, text: string, extra?: Record<string, any>) {
   const r = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, text }),
+    body: JSON.stringify({ mode, text, ...(extra || {}) }),
   });
   const d = await r.json();
   if (d.error) throw new Error(d.error);
   return d;
+}
+
+export async function aiAnalyze(text: string, inTrip = false): Promise<any> {
+  try { return await call("analyze", text, { inTrip }); }
+  catch { return { intent: kwClass(text), summary: text.slice(0, 40) }; }
 }
 
 export async function aiClassify(text: string) {
@@ -43,6 +48,9 @@ export function normalize(obj: any) {
     note: obj.note || "",
     sources: obj.sources || [],   // [{title,url}] — show these in the UI
     asOf: obj.asOf || null,       // date the rates were pulled
+    perks: Array.isArray(obj.perks) ? obj.perks.filter((p: any) => typeof p === "string" && p.trim()) : [],
+    offer: obj.offer || null,
+    redemptions: Array.isArray(obj.redemptions) ? obj.redemptions.filter((p: any) => typeof p === "string" && p.trim()) : [],
   };
 }
 
