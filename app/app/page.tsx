@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { aiClassify, aiCardLookup, aiAnalyze } from "@/lib/ai";
-import { bestForCategory, bestForTrip, rateFor, type Card } from "@/lib/recommend";
+import { bestForCategory, bestForTrip, rateFor, ceilingFor, type Card } from "@/lib/recommend";
+import { resolveMerchant } from "@/lib/merchants";
 import { loadProfile, saveProfile } from "@/lib/supabase";
 
 type Profile = { name: string; email: string; phone: string; address: string; airport: string };
-type AppData = { profile: Profile; cards: Card[]; uses: string[] };
+type AppData = { profile: Profile; cards: Card[]; uses: string[]; spend?: Record<string, number> };
 
 const USE_OPTIONS = ["Travel", "Groceries", "Dining", "Streaming", "Gas", "Online", "Other"];
 const CAT_LABEL: Record<string, string> = {
@@ -203,6 +204,7 @@ function CardPicker({ cards, setCards }: { cards: Card[]; setCards: (c: Card[]) 
         {cards.map((c, i) => (
           <CardTile key={c.id + i} card={c}
             onBalance={(n) => { const next = [...cards]; next[i] = { ...c, points: n }; setCards(next); }}
+            onEdit={(patch) => { const next = [...cards]; next[i] = { ...c, ...patch }; setCards(next); }}
             onRemove={() => setCards(cards.filter((_, j) => j !== i))} />
         ))}
         {!cards.length && <div className="muted" style={{ fontSize: 12, padding: 6 }}>No cards yet — add one or click <b>Seed demo</b>.</div>}
@@ -211,13 +213,11 @@ function CardPicker({ cards, setCards }: { cards: Card[]; setCards: (c: Card[]) 
   );
 }
 
-function CardTile({ card, onBalance, onRemove, expanded = true }: { card: Card; onBalance: (n: number) => void; onRemove: () => void; expanded?: boolean }) {
-  const sources = (card as any).sources as { title: string; url: string }[] | undefined;
-  const asOf = (card as any).asOf as string | undefined;
-  const perks = (card as any).perks as string[] | undefined;
-  const offer = (card as any).offer as string | undefined | null;
-  const redemptions = (card as any).redemptions as string[] | undefined;
+function CardTile({ card, onBalance, onRemove, onEdit, expanded = true }: { card: Card; onBalance: (n: number) => void; onRemove: () => void; onEdit?: (patch: Partial<Card>) => void; expanded?: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const { sources, asOf, perks, offer, redemptions } = card;
   const balanceUsd = (card.points * card.cpp) / 100;
+  const ceiling = ceilingFor(card);
 
   // Sort categories by effective % value
   const rows = Object.entries(card.r || {})
@@ -234,9 +234,14 @@ function CardTile({ card, onBalance, onRemove, expanded = true }: { card: Card; 
       <div className="card-tile">
         <div className="swatch" style={{ background: card.color }} />
         <div className="meta">
-          <div className="name">{card.name}</div>
+          <div className="name">
+            {card.name}
+            {card.edited && <span className="tag" style={{ marginLeft: 6, fontSize: 9.5, padding: "0 5px" }}>edited</span>}
+          </div>
           <div className="sub">
-            {card.issuer} · <span className="mono">{card.cpp.toFixed(2)}¢/pt</span> · best on <b style={{ color: "var(--fg-1)" }}>{CAT_LABEL[topRow.cat] || topRow.cat}</b> ({topRow.rate.toFixed(1)}×)
+            {card.issuer} · <span className="mono">{card.cpp.toFixed(2)}¢/pt</span>
+            {card.annualFee ? <> · <span className="mono">${card.annualFee}/yr</span></> : <> · no fee</>}
+            {" · "}best on <b style={{ color: "var(--fg-1)" }}>{CAT_LABEL[topRow.cat] || topRow.cat}</b> ({topRow.rate.toFixed(1)}×)
           </div>
           {(sources?.length || asOf) && (
             <div className="sources">
@@ -252,23 +257,42 @@ function CardTile({ card, onBalance, onRemove, expanded = true }: { card: Card; 
       </div>
       {expanded && (
         <div className="card-breakdown">
+          <div className="ceiling-strip">
+            <span className="ceiling-label">Ceiling</span>
+            <span className="ceiling-main">
+              Max <b>{ceiling.topValuePct.toFixed(2)}%</b> back on <b>{CAT_LABEL[ceiling.topCategory] || ceiling.topCategory}</b> ({ceiling.topRate.toFixed(1)}×)
+            </span>
+            {ceiling.balanceUsd > 0 && <span className="ceiling-extra">balance ≈ ${ceiling.balanceUsd.toFixed(0)}</span>}
+            {ceiling.hasOffer && <span className="ceiling-extra gold">offer live</span>}
+          </div>
+
           <div className="bd-head">
             <span className="bd-title">Where to use this card</span>
-            {card.points > 0 && (
-              <span className="bd-balance">
-                {card.points.toLocaleString()} pts ≈ <b>${balanceUsd.toFixed(2)}</b>
-              </span>
-            )}
+            <span className="row" style={{ gap: 10, alignItems: "center" }}>
+              {card.points > 0 && (
+                <span className="bd-balance">
+                  {card.points.toLocaleString()} pts ≈ <b>${balanceUsd.toFixed(2)}</b>
+                </span>
+              )}
+              {onEdit && (
+                <button className="bd-edit" onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Edit"}</button>
+              )}
+            </span>
           </div>
-          <div className="bd-grid">
-            {rows.map((r) => (
-              <div key={r.cat} className={`bd-row ${r === rows[0] ? "best" : ""}`}>
-                <span className={`tag tag-cat`} data-cat={r.cat}>{CAT_LABEL[r.cat] || r.cat}</span>
-                <span className="bd-rate"><span className="mono">{r.rate.toFixed(1)}×</span></span>
-                <span className="bd-value mono">{r.value.toFixed(2)}%</span>
-              </div>
-            ))}
-          </div>
+
+          {editing && onEdit ? (
+            <CardEditor card={card} onEdit={onEdit} />
+          ) : (
+            <div className="bd-grid">
+              {rows.map((r) => (
+                <div key={r.cat} className={`bd-row ${r === rows[0] ? "best" : ""}`}>
+                  <span className={`tag tag-cat`} data-cat={r.cat}>{CAT_LABEL[r.cat] || r.cat}</span>
+                  <span className="bd-rate"><span className="mono">{r.rate.toFixed(1)}×</span></span>
+                  <span className="bd-value mono">{r.value.toFixed(2)}%</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {(offer || perks?.length || redemptions?.length) && <div className="divider" style={{ margin: "14px 0 12px" }} />}
 
@@ -298,6 +322,39 @@ function CardTile({ card, onBalance, onRemove, expanded = true }: { card: Card; 
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* Inline correction for wrong AI extractions. Sets `edited` so a later
+ * re-lookup won't clobber the user's numbers. */
+function CardEditor({ card, onEdit }: { card: Card; onEdit: (patch: Partial<Card>) => void }) {
+  const cats = ["dining", "travel", "streaming", "groceries", "gas", "online", "other"];
+  return (
+    <div className="card-editor">
+      <div className="ce-top">
+        <label className="ce-field">
+          <span>Point value (¢/pt)</span>
+          <input className="input ce-input" type="number" step={0.05} min={0} value={card.cpp}
+            onChange={(e) => onEdit({ cpp: Number(e.target.value) || 0, edited: true })} />
+        </label>
+        <label className="ce-field">
+          <span>Annual fee ($)</span>
+          <input className="input ce-input" type="number" min={0} value={card.annualFee ?? 0}
+            onChange={(e) => onEdit({ annualFee: Number(e.target.value) || 0, edited: true })} />
+        </label>
+      </div>
+      <div className="ce-grid">
+        {cats.map((cat) => (
+          <label key={cat} className="ce-cell">
+            <span className="tag tag-cat" data-cat={cat}>{CAT_LABEL[cat] || cat}</span>
+            <input className="input ce-input sm" type="number" step={0.5} min={0} value={card.r?.[cat] ?? 1}
+              onChange={(e) => onEdit({ r: { ...card.r, [cat]: Number(e.target.value) || 0 }, edited: true })} />
+            <span className="muted mono" style={{ fontSize: 11 }}>×</span>
+          </label>
+        ))}
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>Edits stick and won't be overwritten by a re-lookup.</div>
     </div>
   );
 }
@@ -633,28 +690,40 @@ function MsgView({ m, data, onChip }: { m: Msg; data: AppData; onChip: (k: keyof
 /* ============================================================ Rec card */
 
 function RecCard({ category, query, data, amount }: { category: string; query: string; data: AppData; amount: number | null }) {
-  const ranked = useMemo(() => bestForCategory(data.cards, category), [data.cards, category]);
+  // Curated merchant knowledge wins over the model's coarse intent: a real
+  // merchant codes in a specific category, so rank on THAT, not the guess.
+  const merch = resolveMerchant(query || "");
+  const cat = merch?.category || category;
+
+  const annualSpend = data.spend?.[cat];
+  const ranked = useMemo(() => bestForCategory(data.cards, cat, annualSpend), [data.cards, cat, annualSpend]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   if (!ranked.length) {
     return <div className="muted">Add a card first — open My cards in the sidebar.</div>;
   }
-  const pick = ranked[0];
-  const backup = ranked[1];
-  const m = MERCHANT[category] || MERCHANT.other;
+
+  const recommended = ranked[0];
+  const selected = ranked.find((c) => c.id === selectedId) ?? recommended;
+  const isOverride = selected.id !== recommended.id;
+
+  const m = MERCHANT[cat] || MERCHANT.other;
   const link = m.href(query);
 
-  const rate = rateFor(pick, category);
-  const valuePct = rate * pick.cpp;           // % effective value
-  const baselineRate = 1;                     // default 1× card baseline
+  const rate = rateFor(selected, cat);
+  const valuePct = rate * selected.cpp;
   const spend = amount && amount > 0 ? amount : 100;
   const ptsEarned = Math.round(rate * spend);
-  const dollarEarned = (rate * spend * pick.cpp) / 100;
-  const savedVsBaseline = ((rate - baselineRate) * spend * pick.cpp) / 100;
+  const dollarEarned = (rate * spend * selected.cpp) / 100;
+  const bestDollar = (rateFor(recommended, cat) * spend * recommended.cpp) / 100;
+  const givenUp = bestDollar - dollarEarned;
+  const cap = selected.caps?.[cat];
 
   return (
     <div className="rec fade">
       <div className="head">
         <div className="row" style={{ gap: 6, alignItems: "center" }}>
-          <span className="tag tag-cat" data-cat={category}>{CAT_LABEL[category] || "Everyday"}</span>
+          <span className="tag tag-cat" data-cat={cat}>{CAT_LABEL[cat] || "Everyday"}</span>
           <span className="muted" style={{ fontSize: 12 }}>{m.name} handoff</span>
         </div>
         <span className="headline-value">
@@ -662,12 +731,18 @@ function RecCard({ category, query, data, amount }: { category: string; query: s
           <span className="u">back</span>
         </span>
       </div>
-      <h3>Use {pick.name}</h3>
+
+      <h3>{isOverride ? `Your pick: ${selected.name}` : `Use ${selected.name}`}</h3>
       <div className="why">
-        <b>{rate.toFixed(1)}×</b> on {CAT_LABEL[category] || "this"} · <span className="mono">{pick.cpp.toFixed(2)}¢/pt</span>
+        <b>{rate.toFixed(1)}×</b> on {CAT_LABEL[cat] || "this"} · <span className="mono">{selected.cpp.toFixed(2)}¢/pt</span>
+        {!isOverride && <span className="tag gold" style={{ marginLeft: 8 }}>our pick</span>}
       </div>
 
-      <div className="stat-grid" style={{ gridTemplateColumns: amount ? "repeat(3,1fr)" : "repeat(3,1fr)" }}>
+      {merch?.note && (
+        <div className="cap-note" style={{ marginBottom: 10 }}>Heads up: {merch.note}</div>
+      )}
+
+      <div className="stat-grid">
         <div className="stat">
           <div className="label">Spend</div>
           <div className="val">${spend.toLocaleString()}</div>
@@ -682,35 +757,45 @@ function RecCard({ category, query, data, amount }: { category: string; query: s
         </div>
       </div>
 
-      {savedVsBaseline > 0 && (
-        <div className="tag gold" style={{ marginBottom: 12 }}>
-          Save +${savedVsBaseline.toFixed(2)} vs a default 1× card
-        </div>
-      )}
-
-      <div className="card-tile" style={{ marginBottom: 8 }}>
-        <div className="swatch" style={{ background: pick.color }} />
-        <div className="meta">
-          <div className="name">{pick.name}</div>
-          <div className="sub">{pick.issuer} · {pick.cur}</div>
-        </div>
-        <span />
-        <span className="tag gold">{rateFor(pick, category).toFixed(1)}×</span>
+      <div className="pick-head">
+        <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Your wallet, ranked</span>
+        <span className="muted" style={{ fontSize: 11 }}>tap to choose · you decide</span>
+      </div>
+      <div className="pick-list">
+        {ranked.map((c) => {
+          const r = rateFor(c, cat);
+          const v = r * c.cpp;
+          const chosen = c.id === selected.id;
+          const best = c.id === recommended.id;
+          const cCap = c.caps?.[cat];
+          return (
+            <button key={c.id} className={`pick-row ${chosen ? "chosen" : ""}`} onClick={() => setSelectedId(c.id)}>
+              <span className="swatch" style={{ background: c.color }} />
+              <span className="pick-meta">
+                <span className="pick-name">
+                  {c.name}
+                  {best && <span className="tag gold" style={{ marginLeft: 6, fontSize: 9.5, padding: "0 5px" }}>best</span>}
+                </span>
+                <span className="pick-sub">
+                  {c.issuer} · {c.annualFee ? `$${c.annualFee}/yr` : "no fee"}
+                  {cCap ? ` · ${r.toFixed(0)}× to $${Math.round(cCap.limit / 1000)}k` : ""}
+                </span>
+              </span>
+              <span className="pick-nums">
+                <span className="mono pick-rate">{r.toFixed(1)}×</span>
+                <span className="mono pick-val">{v.toFixed(2)}%</span>
+              </span>
+              <span className={`radio ${chosen ? "on" : ""}`} aria-hidden />
+            </button>
+          );
+        })}
       </div>
 
-      {backup && (
-        <>
-          <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Backup</div>
-          <div className="card-tile">
-            <div className="swatch" style={{ background: backup.color }} />
-            <div className="meta">
-              <div className="name">{backup.name}</div>
-              <div className="sub">{backup.issuer}</div>
-            </div>
-            <span />
-            <span className="tag">{rateFor(backup, category).toFixed(1)}×</span>
-          </div>
-        </>
+      {isOverride && givenUp > 0.005 && (
+        <div className="cap-note warn">Leaves about ${givenUp.toFixed(2)} on the table vs {recommended.name} at this spend — your call.</div>
+      )}
+      {cap && (
+        <div className="cap-note">{rate.toFixed(1)}× applies up to ${cap.limit.toLocaleString()}/yr, then {cap.postRate}×.</div>
       )}
 
       <div className="divider" />
@@ -920,7 +1005,7 @@ function CardsView({ data, setData }: { data: AppData; setData: (d: AppData) => 
         ) : (
           <div className="col">
             {data.cards.map((c, i) => (
-              <CardTile key={c.id + i} card={c} onBalance={(n) => update(i, { points: n })} onRemove={() => remove(i)} />
+              <CardTile key={c.id + i} card={c} onBalance={(n) => update(i, { points: n })} onEdit={(patch) => update(i, patch)} onRemove={() => remove(i)} />
             ))}
           </div>
         )}
