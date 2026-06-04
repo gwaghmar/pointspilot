@@ -1443,3 +1443,21 @@ a:hover { color: var(--accent-hover); }
 .resv-f { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .resv-f > span { font-size: 11px; color: var(--fg-2); font-weight: 500; }
 .resv .btn-primary { width: 100%; }
+
+/* ============================================================ Phase 5: wallet gap analysis (Get more) */
+
+.gap-card {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--bg-elev-1); padding: 14px 16px; box-shadow: var(--shadow-1);
+}
+.gap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.gap-delta { font-size: 12px; font-weight: 700; color: var(--gold-text); }
+.gap-body { display: flex; align-items: center; gap: 12px; }
+.gap-now { flex: 1; min-width: 0; }
+.gap-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-3); font-weight: 600; }
+.gap-val { font-size: 12.5px; color: var(--fg-1); margin-top: 3px; }
+.gap-arrow { color: var(--fg-3); font-size: 16px; flex-shrink: 0; }
+.gap-next { flex: 1.3; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.gap-next .swatch { width: 40px; height: 26px; border-radius: 4px; flex-shrink: 0; }
+.gap-name { font-size: 13.5px; font-weight: 600; color: var(--fg-0); }
+.gap-sub { font-size: 11.5px; color: var(--fg-2); margin-top: 2px; }

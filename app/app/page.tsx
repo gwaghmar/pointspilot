@@ -5,6 +5,7 @@ import { aiClassify, aiCardLookup, aiAnalyze, aiNearby, type NearbyPlace, type N
 import { bestForCategory, bestForTrip, rateFor, ceilingFor, type Card } from "@/lib/recommend";
 import { resolveMerchant } from "@/lib/merchants";
 import { buildReservationUrl } from "@/lib/reservations";
+import { analyzeWallet, type Gap } from "@/lib/gaps";
 import { loadProfile, saveProfile } from "@/lib/supabase";
 
 type Profile = { name: string; email: string; phone: string; address: string; airport: string };
@@ -50,7 +51,7 @@ type Msg =
   | { id: string; from: "bot"; kind: "rec"; category: string; query?: string; amount?: number | null }
   | { id: string; from: "bot"; kind: "trip"; trip: Trip };
 
-type View = "chat" | "cards" | "profile";
+type View = "chat" | "cards" | "discover" | "profile";
 
 const mkId = () => Math.random().toString(36).slice(2, 10);
 
@@ -379,9 +380,10 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
         </div>
 
         <div className="sb-section">Workspace</div>
-        <SbItem icon="◐" label="Chat"    active={view === "chat"}    onClick={() => setView("chat")} />
-        <SbItem icon="□" label="My cards" active={view === "cards"}  onClick={() => setView("cards")} />
-        <SbItem icon="○" label="Profile" active={view === "profile"} onClick={() => setView("profile")} />
+        <SbItem icon="◐" label="Chat"     active={view === "chat"}     onClick={() => setView("chat")} />
+        <SbItem icon="□" label="My cards"  active={view === "cards"}    onClick={() => setView("cards")} />
+        <SbItem icon="✦" label="Get more"  active={view === "discover"} onClick={() => setView("discover")} />
+        <SbItem icon="○" label="Profile"  active={view === "profile"}  onClick={() => setView("profile")} />
 
         <div className="sb-section">At a glance</div>
         <div className="sb-card">
@@ -410,7 +412,7 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
           <div className="crumb">
             <span className="wordmark sm">PointsPilot</span>
             <span className="sep">/</span>
-            <span className="page-name">{view === "chat" ? "Chat" : view === "cards" ? "My cards" : "Profile"}</span>
+            <span className="page-name">{view === "chat" ? "Chat" : view === "cards" ? "My cards" : view === "discover" ? "Get more" : "Profile"}</span>
           </div>
           <div className="right">
             {view === "chat" && (
@@ -424,6 +426,7 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
 
         {view === "chat" && <ChatView data={data} />}
         {view === "cards" && <CardsView data={data} setData={setData} />}
+        {view === "discover" && <GapsView data={data} setData={setData} />}
         {view === "profile" && <ProfileView data={data} />}
       </div>
     </div>
@@ -1146,6 +1149,90 @@ function CardsView({ data, setData }: { data: AppData; setData: (d: AppData) => 
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ============================================================ Get more (gap analysis) */
+
+function GapsView({ data, setData }: { data: AppData; setData: (d: AppData) => void }) {
+  const gaps = useMemo(() => analyzeWallet(data.cards, data.uses, data.spend), [data.cards, data.uses, data.spend]);
+  const [addingId, setAddingId] = useState<string | null>(null);
+
+  async function addCard(name: string, id: string) {
+    if (addingId) return;
+    setAddingId(id);
+    try {
+      const card = await aiCardLookup(name);
+      const next = { ...data, cards: [...data.cards, card] };
+      setData(next); await saveProfile(next);
+    } finally { setAddingId(null); }
+  }
+
+  return (
+    <div className="content">
+      <div className="page">
+        <div className="page-head">
+          <h1>Get more from your wallet</h1>
+          <p>Where a new card would beat what you already carry — fee-aware, in dollars. You decide; we just show the math.</p>
+        </div>
+
+        {!data.cards.length ? (
+          <div className="empty">
+            <div className="big">Add your cards first</div>
+            <div className="small">Once we know your wallet, this shows exactly where a new card would earn you more.</div>
+          </div>
+        ) : !gaps.length ? (
+          <div className="empty">
+            <div className="big">Your wallet already covers it</div>
+            <div className="small">No catalog card meaningfully beats your current best in the categories you picked.</div>
+          </div>
+        ) : (
+          <div className="col">
+            {gaps.map((g) => (
+              <GapCard key={g.category} gap={g} adding={addingId === g.suggestion.id} onAdd={() => addCard(g.suggestion.name, g.suggestion.id)} />
+            ))}
+          </div>
+        )}
+
+        <div className="muted" style={{ fontSize: 11, marginTop: 16 }}>
+          Suggestions come from a curated catalog of well-known cards, not live data. Adding one pulls its current live rates.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GapCard({ gap, adding, onAdd }: { gap: Gap; adding: boolean; onAdd: () => void }) {
+  const s = gap.suggestion;
+  return (
+    <div className="gap-card fade">
+      <div className="gap-head">
+        <span className="tag tag-cat" data-cat={gap.category}>{CAT_LABEL[gap.category] || gap.category}</span>
+        <span className="gap-delta">
+          +{gap.deltaPct.toFixed(2)}% back{gap.estAnnualGain ? ` · ~$${Math.round(gap.estAnnualGain).toLocaleString()}/yr` : ""}
+        </span>
+      </div>
+      <div className="gap-body">
+        <div className="gap-now">
+          <div className="gap-label">You carry</div>
+          <div className="gap-val">{gap.currentBestName ? `${gap.currentBestName} · ${gap.currentValuePct.toFixed(2)}%` : "No card for this"}</div>
+        </div>
+        <div className="gap-arrow">→</div>
+        <div className="gap-next">
+          <div className="swatch" style={{ background: s.color }} />
+          <div style={{ minWidth: 0 }}>
+            <div className="gap-name">{s.name}</div>
+            <div className="gap-sub">
+              {s.issuer} · {gap.suggestionRate.toFixed(1)}× · {gap.suggestionValuePct.toFixed(2)}% · {gap.annualFee ? `$${gap.annualFee}/yr` : "no fee"}
+            </div>
+          </div>
+        </div>
+      </div>
+      {gap.offer && <div className="offer-pill" style={{ marginTop: 10 }}>{gap.offer}</div>}
+      <button className="btn btn-primary btn-lg" style={{ marginTop: 10 }} onClick={onAdd} disabled={adding}>
+        {adding ? <span className="spinner" /> : "Add to my cards"}
+      </button>
     </div>
   );
 }
