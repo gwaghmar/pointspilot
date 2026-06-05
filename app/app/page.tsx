@@ -84,18 +84,22 @@ function Onboarding({ onDone }: { onDone: (d: AppData) => void }) {
   const [profile, setProfile] = useState<Profile>({ name: "", email: "", phone: "", address: "", airport: "" });
   const [cards, setCards] = useState<Card[]>([]);
   const [uses, setUses] = useState<string[]>([]);
+  const [spend, setSpend] = useState<Record<string, number>>({});
 
   const canNext =
     (step === 0 && profile.name && profile.email && profile.phone) ||
     (step === 1 && profile.address && profile.airport) ||
     (step === 2 && cards.length > 0) ||
-    (step === 3 && uses.length > 0);
+    (step === 3 && uses.length > 0) ||
+    (step === 4);
+
+  const spendCats = uses.map((u) => u.toLowerCase()).filter((c) => c !== "other");
 
   return (
     <div className="onb-wrap">
       <div className="onb-card fade">
         <div className="onb-steps">
-          {[0, 1, 2, 3].map((i) => <div key={i} className={`onb-step ${i <= step ? "on" : ""}`} />)}
+          {[0, 1, 2, 3, 4].map((i) => <div key={i} className={`onb-step ${i <= step ? "on" : ""}`} />)}
         </div>
 
         {step === 0 && (
@@ -139,13 +143,42 @@ function Onboarding({ onDone }: { onDone: (d: AppData) => void }) {
           </>
         )}
 
+        {step === 4 && (
+          <>
+            <h2>Roughly, how much do you spend?</h2>
+            <p className="lead">Optional, but it unlocks cap-aware picks and shows real dollar gains. Skip and add it later anytime.</p>
+            <div className="spend-grid">
+              {spendCats.map((cat) => {
+                const annual = spend[cat] ?? 0;
+                return (
+                  <label key={cat} className="spend-cell">
+                    <span className="tag tag-cat" data-cat={cat}>{CAT_LABEL[cat] || cat}</span>
+                    <span className="spend-dollar">$</span>
+                    <input className="input ce-input" type="number" min={0} step={25} placeholder="0"
+                      value={annual ? Math.round(annual / 12) : ""}
+                      onChange={(e) => {
+                        const monthly = Number(e.target.value) || 0;
+                        setSpend((s) => {
+                          const next = { ...s };
+                          if (monthly > 0) next[cat] = Math.round(monthly * 12); else delete next[cat];
+                          return next;
+                        });
+                      }} />
+                    <span className="muted" style={{ fontSize: 11 }}>/mo</span>
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        )}
+
         <div className="onb-foot">
           <button className="btn btn-ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}>Back</button>
           <div className="spacer" />
-          {step < 3 ? (
-            <button className="btn btn-primary btn-lg" disabled={!canNext} onClick={() => setStep((s) => Math.min(3, s + 1))}>Continue</button>
+          {step < 4 ? (
+            <button className="btn btn-primary btn-lg" disabled={!canNext} onClick={() => setStep((s) => Math.min(4, s + 1))}>Continue</button>
           ) : (
-            <button className="btn btn-primary btn-lg" disabled={!canNext} onClick={() => onDone({ profile, cards, uses })}>Finish</button>
+            <button className="btn btn-primary btn-lg" disabled={!canNext} onClick={() => onDone({ profile, cards, uses, spend })}>Finish</button>
           )}
         </div>
       </div>
