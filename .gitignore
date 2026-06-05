@@ -19,3 +19,8 @@ files.zip
 *.log
 .DS_Store
 
+# test artifacts
+.playwright-mcp/
+*-e2e.png
+perks-render-*.png
+

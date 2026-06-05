@@ -833,6 +833,48 @@ a:hover { color: var(--accent-hover); }
   padding-top: 8px;
   border-top: 1px dashed var(--border-strong);
 }
+
+.trip-opt-perks {
+  padding-top: 10px;
+  border-top: 1px dashed var(--gold-border);
+  margin-top: 4px;
+}
+.trip-opt-offer {
+  padding: 6px 10px;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold-border);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--gold-text);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.trip-opt-perks-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fg-3);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.trip-opt-perks-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.trip-opt-perks-list li {
+  position: relative;
+  padding-left: 14px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fg-1);
+}
+.trip-opt-perks-list li::before {
+  content: "✓";
+  position: absolute; left: 0; top: 0;
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 11px;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(6px); }

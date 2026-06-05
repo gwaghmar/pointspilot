@@ -1044,6 +1044,13 @@ function TripOption({ label, sub, pick, why, active, mode }:
   const earn = rateFor(pick, "travel");
   const earnPct = (earn * pick.cpp).toFixed(2);
   const balanceUsd = (pick.points * pick.cpp) / 100;
+  const perks = (pick as any).perks as string[] | undefined;
+  const offer = (pick as any).offer as string | undefined | null;
+
+  // Filter perks to travel-relevant keywords for the highlighted pick
+  const travelPerks = perks?.filter((p) =>
+    /lounge|travel|trip|hotel|airline|tsa|global entry|priority pass|insurance|hertz|baggage|credit|airport|portal|companion|seat|delta|amex|chase/i.test(p)
+  ) ?? [];
 
   return (
     <div className={`trip-opt ${active ? "active" : ""}`}>
@@ -1082,6 +1089,20 @@ function TripOption({ label, sub, pick, why, active, mode }:
         )}
       </div>
       <div className="trip-opt-why">{why}</div>
+
+      {active && (travelPerks.length > 0 || offer) && (
+        <div className="trip-opt-perks">
+          {offer && <div className="trip-opt-offer">🎁 {offer}</div>}
+          {travelPerks.length > 0 && (
+            <>
+              <div className="trip-opt-perks-title">Perks for this trip</div>
+              <ul className="trip-opt-perks-list">
+                {travelPerks.slice(0, 4).map((p, i) => <li key={i}>{p}</li>)}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
