@@ -15,7 +15,7 @@ The trick: an LLM by itself doesn't know *current* reward rates and will halluci
 
 ```mermaid
 flowchart LR
-    User([User]):::user --> Next[Next.js 14<br/>App Router<br/>React 18 + TS]:::frontend
+    User([User]):::user --> Next[Next.js 16<br/>App Router<br/>React 18 + TS]:::frontend
     Next -->|/api/ai| API[Server Route<br/>app/api/ai/route.ts]:::api
     API --> Tavily[Tavily<br/>Live Web Search]:::search
     API --> LLM[OpenRouter<br/>gpt-4o-mini<br/>JSON extraction]:::ai
@@ -37,11 +37,11 @@ flowchart LR
 | Layer | Tool | Why |
 |---|---|---|
 | Host | **Vercel** | Zero-config Next.js deploys, env vars, edge network |
-| Framework | **Next.js 14 (App Router)** | Server routes + React 18 in one repo |
+| Framework | **Next.js 16 (App Router)** | Server routes + React 18 in one repo |
 | Language | **TypeScript 5.6** | Typed contracts between AI JSON and UI |
 | AI gateway | **OpenRouter** (`openai/gpt-4o-mini`) | One key, swap models freely, low cost |
 | Search | **Tavily** | Live web rates — 1k free searches/mo |
-| Data | **Supabase (Postgres)** | 30-day card cache + user profile |
+| Data | **Supabase (Postgres)** | 30-day card cache + authenticated user profile |
 | Ranking | **lib/recommend.ts** | Plain math picks the winner — model never decides |
 
 ---
@@ -61,7 +61,7 @@ The model never invents rates — it only reformats what the search returned, an
 
 ## How recommendations stay correct
 
-`lib/recommend.ts` does the ranking in plain math — cap-aware effective value, fee-aware net annual value, and fare-aware trip logic. **The AI supplies DATA and a recommendation; the USER makes the final call.** Every surface shows the full ranked field and the math behind it, so the recommendation is reliable *and* auditable. Merchant coding quirks (`lib/merchants.ts`) and the "what card should I get next" gap analyzer (`lib/gaps.ts` over a curated `lib/catalog.ts`) are deterministic too — the model never ranks.
+`lib/recommend.ts` does the ranking in plain math — cap-aware effective value, fee-aware net annual value, and fare-aware trip logic. **The AI supplies DATA and a recommendation; the USER makes the final call.** Every surface shows the full ranked field and the math behind it, so the recommendation is reliable *and* auditable. Merchant coding quirks (`lib/merchants.ts`) are deterministic too — the model never ranks.
 
 ---
 
@@ -69,7 +69,7 @@ The model never invents rates — it only reformats what the search returned, an
 
 ```
 app/
-  api/ai/route.ts      # server: Tavily search -> OpenRouter extract -> JSON
+  api/ai/route.ts      # server: rate-limit -> Tavily search -> OpenRouter extract -> JSON
   page.tsx             # client: onboarding + lookup + recommendations UI
   layout.tsx
   globals.css
@@ -77,12 +77,11 @@ lib/
   ai.ts                # client-side wrappers around /api/ai
   recommend.ts         # deterministic ranking: cap/fee-aware value, ceiling, trip math
   merchants.ts         # merchant -> category + coding-quirk caveats
-  catalog.ts           # curated candidate cards (for gap analysis)
-  gaps.ts              # "what card should I get next" (analyzeWallet)
+  gaps.ts              # wallet coverage summaries without static card offers
   reservations.ts      # pre-filled booking deep links + agent seam
-  supabase.ts          # profile + cache I/O
+  supabase.ts          # local draft + authenticated profile I/O
 supabase/
-  schema.sql           # tables: profiles, card_cache
+  schema.sql           # tables: profiles, card_cache, api_rate_limits
 .env.local.example     # copy to .env.local and fill in
 ```
 
@@ -110,13 +109,15 @@ npm install
 
 ```bash
 cp .env.local.example .env.local
-# fill in all six values
+# fill in all required values
 ```
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_MODEL=openai/gpt-4o-mini
 OPENROUTER_REFERRER=http://localhost:3000
+AI_MAX_TEXT_CHARS=2000
+AI_RATE_LIMIT_PER_MINUTE=30
 
 TAVILY_API_KEY=tvly-...
 
@@ -159,9 +160,9 @@ Results from `cardLookup` are cached in Supabase `card_cache` for 30 days keyed 
 
 ## Honest limits
 
-- Reward extraction is only as good as the search results. Showing `sources` + `asOf` lets users sanity-check — that's the right MVP posture, not a substitute for real verification.
+- Reward extraction is only as good as the search results. Showing `sources` + `asOf` lets users sanity-check; this still needs monitoring and review before a serious public launch.
 - `gpt-4o-mini` is cheap and good enough for extraction. Bump to a larger model on the `cardLookup` call alone if accuracy matters more than cost.
-- **No auth yet** — profiles are device-scoped and the Supabase tables are open. Add Supabase Auth + RLS before any real launch.
+- Supabase Auth and RLS are required for server-side profile persistence. Anonymous users should be treated as local drafts, not durable accounts.
 - Tavily's free tier is the gate. The 30-day cache means a typical user costs <10 searches/month.
 - Brave "Data for AI" is a solid Tavily alternative with configurable freshness (24h / 7d / 30d) if you want tighter recency control.
 

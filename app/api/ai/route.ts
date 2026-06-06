@@ -1,8 +1,18 @@
 import OpenAI from "openai";
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+
+const MAX_TEXT_CHARS = Number(process.env.AI_MAX_TEXT_CHARS || 2000);
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = Number(process.env.AI_RATE_LIMIT_PER_MINUTE || 30);
+const allowedModes = new Set(["classify", "cardLookup", "tripExtract", "spendExtract", "analyze", "nearby"]);
+
+type RateBucket = { count: number; resetAt: number };
+const rateBuckets = (globalThis as typeof globalThis & { __ppRateBuckets?: Map<string, RateBucket> }).__ppRateBuckets ?? new Map<string, RateBucket>();
+(globalThis as typeof globalThis & { __ppRateBuckets?: Map<string, RateBucket> }).__ppRateBuckets = rateBuckets;
 
 /* OpenRouter via the OpenAI-compatible v1 endpoint. Key stays server-side.
  * Lazy-init so `next build` doesn't fail when env vars are absent. */
@@ -34,6 +44,7 @@ const keyOf = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0
 
 /* ---- Tavily web search (LLM-ready results) ---- */
 async function webSearch(query: string) {
+  if (!process.env.TAVILY_API_KEY) throw new Error("TAVILY_API_KEY not set");
   const r = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: {
@@ -280,10 +291,75 @@ Example: "Weekly groceries" -> {"amount":null,"merchantQuery":"weekly groceries"
   return JSON.parse(c.choices[0]?.message?.content || "{}");
 }
 
+function clientKey(req: NextRequest) {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const raw = forwarded || req.headers.get("x-real-ip") || "local";
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+function memoryRateLimit(key: string) {
+  const now = Date.now();
+  const current = rateBuckets.get(key);
+  if (!current || current.resetAt <= now) {
+    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return null;
+  }
+  current.count += 1;
+  if (current.count <= RATE_LIMIT_MAX) return null;
+  return Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+}
+
+async function checkRateLimit(req: NextRequest) {
+  const key = clientKey(req);
+  if (supa) {
+    const now = new Date();
+    const resetAt = new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString();
+    try {
+      const { data } = await supa.from("api_rate_limits").select("count, reset_at").eq("key", key).maybeSingle();
+      if (!data || new Date(data.reset_at).getTime() <= now.getTime()) {
+        await supa.from("api_rate_limits").upsert({ key, count: 1, reset_at: resetAt });
+        return null;
+      }
+
+      const count = Number(data.count || 0) + 1;
+      if (count > RATE_LIMIT_MAX) {
+        return Math.max(1, Math.ceil((new Date(data.reset_at).getTime() - now.getTime()) / 1000));
+      }
+
+      await supa.from("api_rate_limits").update({ count }).eq("key", key);
+      return null;
+    } catch {
+      return memoryRateLimit(key);
+    }
+  }
+  return memoryRateLimit(key);
+}
+
+function publicError(e: unknown) {
+  if (process.env.NODE_ENV !== "production") return e instanceof Error ? e.message : String(e);
+  return "AI request could not be completed.";
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const retryAfter = await checkRateLimit(req);
+    if (retryAfter) {
+      return NextResponse.json(
+        { error: "Too many AI requests. Please wait a moment and try again." },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+
     const body = await req.json();
     const { mode, text, inTrip } = body;
+    if (!allowedModes.has(mode)) return NextResponse.json({ error: "unknown mode" }, { status: 400 });
+    if (typeof text !== "string" || !text.trim()) {
+      return NextResponse.json({ error: "text is required" }, { status: 400 });
+    }
+    if (text.length > MAX_TEXT_CHARS) {
+      return NextResponse.json({ error: `text must be ${MAX_TEXT_CHARS} characters or fewer` }, { status: 413 });
+    }
+
     if (mode === "classify")    return NextResponse.json(await classify(text));
     if (mode === "cardLookup")  return NextResponse.json(await cardLookup(text));
     if (mode === "tripExtract") return NextResponse.json(await tripExtract(text));
@@ -292,6 +368,6 @@ export async function POST(req: NextRequest) {
     if (mode === "nearby")      return NextResponse.json(await nearby(text));
     return NextResponse.json({ error: "unknown mode" }, { status: 400 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
+    return NextResponse.json({ error: publicError(e) }, { status: 500 });
   }
 }

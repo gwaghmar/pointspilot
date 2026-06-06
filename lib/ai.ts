@@ -23,7 +23,8 @@ async function call(mode: string, text: string, extra?: Record<string, any>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode, text, ...(extra || {}) }),
   });
-  const d = await r.json();
+  const d = await r.json().catch(() => null);
+  if (!r.ok || !d) throw new Error("AI service returned an unavailable response.");
   if (d.error) throw new Error(d.error);
   return d;
 }
@@ -51,6 +52,9 @@ function normCaps(raw: any): Record<string, { limit: number; postRate: number }>
 }
 
 export function normalize(obj: any) {
+  if (!obj?.name || !obj?.issuer) {
+    throw new Error("Card lookup returned incomplete reward data.");
+  }
   return {
     id: (obj.issuer + obj.name + Math.random()).slice(0, 18),
     name: obj.name, issuer: obj.issuer,
@@ -70,8 +74,7 @@ export function normalize(obj: any) {
 }
 
 export async function aiCardLookup(query: string) {
-  try { return normalize(await call("cardLookup", query)); }
-  catch { return normalize({ name: query, issuer: "Card", currency: "Points", cpp: 1, rewards: {}, note: "Lookup failed — try again" }); }
+  return normalize(await call("cardLookup", query));
 }
 
 export async function aiTripExtract(text: string): Promise<Record<string, string>> {

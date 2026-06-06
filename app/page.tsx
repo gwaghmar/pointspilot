@@ -1,26 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-
-const EXAMPLES = [
-  { q: "Book a trip to Miami for 2 next weekend", card: "Capital One Venture X", color: "#0e2a3e", body: "5× on flights",         tag: "9.25% back" },
-  { q: "Spend $250 at Whole Foods",                card: "Amex Gold",            color: "#b29469", body: "4× on groceries",       tag: "+$15 saved" },
-  { q: "Weekly Netflix subscription",              card: "Sapphire Preferred",   color: "#1a3a6e", body: "3× on streaming",       tag: "3.75% back" },
-  { q: "Fill up the tank — $60 of gas",            card: "Freedom Unlimited",    color: "#2c5e3a", body: "1.5× on everything",    tag: "+$0.45 saved" },
-  { q: "Redeem points for a flight to Tokyo",      card: "Venture X balance",    color: "#0e2a3e", body: "71,225 miles on hand",  tag: "≈ $1,318" },
-];
+import { Calculator, Link2, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 export default function Landing() {
-  const [idx, setIdx] = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(() => setIdx((i) => (i + 1) % EXAMPLES.length), 3200);
-    return () => clearInterval(t);
-  }, []);
-
-  const ex = EXAMPLES[idx];
-
   return (
     <div className="lp">
       {/* Nav */}
@@ -46,32 +29,32 @@ export default function Landing() {
           <span className="dot" /> Live web search · grounded recommendations · no fluff
         </div>
         <h1 className="lp-h1">
-          <span className="grad">Google</span> for your<br />reward points.
+          <span className="grad">Google</span> for your <br />reward points.
         </h1>
         <p className="lp-sub">
-          Type any purchase. PointsPilot picks the exact card to use,<br className="hide-sm" />
+          Type any purchase. PointsPilot picks the exact card to use, <br className="hide-sm" />
           shows the dollar value, and hands you off to book.
         </p>
 
-        {/* Search demo */}
+        {/* Search preview */}
         <div className="lp-search">
           <div className="lp-search-bar">
-            <SearchIcon />
-            <span className="lp-typed">{ex.q}</span>
+            <Search size={20} strokeWidth={2.2} style={{ flexShrink: 0, color: "var(--fg-2)" }} />
+            <span className="lp-typed">Ask about a purchase, trip, or redemption</span>
             <span className="lp-caret" />
           </div>
-          <div className="lp-answer fade-key" key={idx}>
-            <div className="lp-answer-swatch" style={{ background: ex.color }} />
+          <div className="lp-answer">
+            <div className="lp-answer-swatch" />
             <div className="lp-answer-body">
-              Use <span className="card-name">{ex.card}</span> · {ex.body}
+              Live wallet data, source links, and deterministic ranking appear here after setup.
             </div>
-            <span className="lp-answer-tag">{ex.tag}</span>
+            <span className="lp-answer-tag">Source-backed</span>
           </div>
         </div>
 
         <div className="lp-hero-cta">
-          <Link href="/app" className="btn btn-primary btn-xl">Try it free — no signup</Link>
-          <span className="lp-cta-meta">5 demo cards loaded · works in 30 seconds</span>
+          <Link href="/app" className="btn btn-primary btn-xl">Start your wallet</Link>
+          <span className="lp-cta-meta">No card numbers or credit checks</span>
         </div>
 
         <div className="lp-trust">
@@ -108,20 +91,20 @@ export default function Landing() {
           <Feature title="Points → dollars" body="See your balance in cash, see your savings per purchase, see exactly what's worth redeeming vs earning." />
           <Feature title="Natural language" body="“One-way to LAX in business, no bag.” One sentence extracts every detail — no forms, no clicks." />
           <Feature title="One-tap handoff" body="Pre-filled deep links to Google Flights, Amazon, Instacart, OpenTable. We tell you what the link can and can't do." />
-          <Feature title="No lock-in" body="Your data lives in your browser + a row in Supabase. No accounts, no email lists, no upsells. Free forever for personal use." />
+          <Feature title="Privacy-first setup" body="No card numbers or credit checks. Profile details are only used to prepare handoffs and ranking context." />
         </div>
       </section>
 
-      {/* Demo strip */}
+      {/* Trust strip */}
       <section className="lp-section">
         <div className="lp-section-head">
-          <span className="lp-kicker">Real numbers</span>
-          <h2>Stop leaving money on the table.</h2>
+          <span className="lp-kicker">Production posture</span>
+          <h2>Built to show its work.</h2>
         </div>
         <div className="lp-strip">
-          <Stat big="+$430" small="Annual savings on $20k of mixed spend, vs a single 1.5% cashback card" />
-          <Stat big="4 sources" small="Average citations per card lookup, all clickable" />
-          <Stat big="< 2s" small="From typing your purchase to a card pick" />
+          <Stat icon={Link2} big="Sources" small="Reward data is shown with links and freshness dates when available." />
+          <Stat icon={Calculator} big="Math" small="Card ranking is deterministic, visible, and separate from AI extraction." />
+          <Stat icon={SlidersHorizontal} big="Control" small="Users can correct rates, caps, fees, and point values before relying on results." />
         </div>
       </section>
 
@@ -129,21 +112,21 @@ export default function Landing() {
       <section id="pricing" className="lp-section">
         <div className="lp-section-head center">
           <span className="lp-kicker">Pricing</span>
-          <h2>Free, while we're cooking.</h2>
-          <p className="lp-section-sub">No accounts, no card numbers, no credit checks. Ever.</p>
+          <h2>Start free.</h2>
+          <p className="lp-section-sub">No card numbers, no credit checks, and no hidden financial-product application flow.</p>
         </div>
         <div className="lp-cta-card">
           <div className="lp-cta-card-head">
-            <div className="lp-tag">Open beta</div>
+            <div className="lp-tag">Early access</div>
             <h3>Free</h3>
             <div className="lp-price">$0<span>/mo</span></div>
           </div>
           <ul className="lp-checklist">
-            <li>Unlimited card lookups</li>
-            <li>Unlimited purchase queries</li>
-            <li>Full trip wizard + flight handoff</li>
+            <li>Live card lookup</li>
+            <li>Purchase and trip recommendations</li>
+            <li>Flight and merchant handoffs</li>
             <li>Source-cited reward data</li>
-            <li>Browser-local profile, no signup</li>
+            <li>Editable wallet assumptions</li>
           </ul>
           <Link href="/app" className="btn btn-primary btn-xl" style={{ width: "100%" }}>
             Open PointsPilot →
@@ -188,20 +171,12 @@ function Feature({ title, body }: { title: string; body: string }) {
   );
 }
 
-function Stat({ big, small }: { big: string; small: string }) {
+function Stat({ icon: Icon, big, small }: { icon: LucideIcon; big: string; small: string }) {
   return (
     <div className="lp-stat">
+      <div className="lp-stat-icon" aria-hidden="true"><Icon size={18} strokeWidth={2.2} /></div>
       <div className="lp-stat-big">{big}</div>
       <div className="lp-stat-small">{small}</div>
     </div>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--fg-2)" }}>
-      <circle cx="11" cy="11" r="7" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
   );
 }

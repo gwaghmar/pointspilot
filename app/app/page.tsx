@@ -1,12 +1,33 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  Gift,
+  MessageCircle,
+  ShoppingBag,
+  TrendingUp,
+  UserRound,
+  WalletCards,
+  type LucideIcon,
+} from "lucide-react";
 import { aiClassify, aiCardLookup, aiAnalyze, aiNearby, type NearbyPlace, type NearbyResult } from "@/lib/ai";
 import { bestForCategory, bestForTrip, rateFor, ceilingFor, type Card } from "@/lib/recommend";
 import { resolveMerchant } from "@/lib/merchants";
 import { buildReservationUrl } from "@/lib/reservations";
-import { analyzeWallet, type Gap } from "@/lib/gaps";
-import { loadProfile, saveProfile } from "@/lib/supabase";
+import { AI_PHASES, estimateAnnualSaved, formatMoney, sourceConfidence } from "@/lib/ux-insights";
+import {
+  clearLocalProfile,
+  getCurrentUser,
+  isSupabaseConfigured,
+  loadProfile,
+  onAuthStateChange,
+  saveProfile,
+  signInWithPassword,
+  signOut,
+  signUp,
+  type AuthUser,
+} from "@/lib/supabase";
 
 type Profile = { name: string; email: string; phone: string; address: string; airport: string };
 type AppData = { profile: Profile; cards: Card[]; uses: string[]; spend?: Record<string, number> };
@@ -24,6 +45,7 @@ const MERCHANT: Record<string, { name: string; href: (q?: string) => string }> =
   online:    { name: "Amazon",    href: (q) => `https://www.amazon.com/s?k=${encodeURIComponent(q || "")}` },
   other:     { name: "Search",    href: (q) => `https://www.google.com/search?q=${encodeURIComponent(q || "")}` },
 };
+const EVERYDAY_CATEGORIES = ["dining", "groceries", "gas", "travel", "online", "streaming", "other"];
 
 const TRIP_PRIORITIES = [
   "Spend the least cash",
@@ -51,16 +73,58 @@ type Msg =
   | { id: string; from: "bot"; kind: "rec"; category: string; query?: string; amount?: number | null }
   | { id: string; from: "bot"; kind: "trip"; trip: Trip };
 
-type View = "chat" | "cards" | "discover" | "profile";
+type View = "chat" | "everyday" | "cards" | "discover" | "profile";
+const NAV_ITEMS: { Icon: LucideIcon; label: string; view: View }[] = [
+  { Icon: MessageCircle, label: "Chat", view: "chat" },
+  { Icon: ShoppingBag, label: "Everyday", view: "everyday" },
+  { Icon: WalletCards, label: "Wallet", view: "cards" },
+  { Icon: TrendingUp, label: "Get more", view: "discover" },
+  { Icon: UserRound, label: "Profile", view: "profile" },
+];
 
 const mkId = () => Math.random().toString(36).slice(2, 10);
 
 export default function Page() {
   const [data, setData] = useState<AppData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const authRequired = isSupabaseConfigured();
 
   useEffect(() => {
-    loadProfile().then((p) => { setData(p); setLoading(false); }).catch(() => setLoading(false));
+    let alive = true;
+
+    async function refresh() {
+      try {
+        const user = await getCurrentUser();
+        const profile = await loadProfile();
+        if (!alive) return;
+        setAuthUser(user);
+        setData(profile);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+
+    const subscription = onAuthStateChange((user) => {
+      setAuthUser(user);
+      setLoading(true);
+      loadProfile().then((profile) => {
+        if (!alive) return;
+        setData(profile);
+        setLoading(false);
+      }).catch(() => {
+        if (alive) setLoading(false);
+      });
+    });
+
+    refresh().catch(() => {
+      if (alive) setLoading(false);
+    });
+
+    return () => {
+      alive = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   if (loading) {
@@ -71,10 +135,87 @@ export default function Page() {
     );
   }
 
+  if (authRequired && !authUser) {
+    return <AuthPanel onAuthenticated={async () => {
+      setLoading(true);
+      const user = await getCurrentUser();
+      const profile = await loadProfile();
+      setAuthUser(user);
+      setData(profile);
+      setLoading(false);
+    }} />;
+  }
+
   if (!data) {
     return <Onboarding onDone={async (d) => { await saveProfile(d); setData(d); }} />;
   }
-  return <Workspace data={data} setData={setData} />;
+  return <Workspace data={data} setData={setData} authUser={authUser} onSignedOut={async () => {
+    await signOut();
+    clearLocalProfile();
+    setAuthUser(null);
+    setData(null);
+  }} />;
+}
+
+function AuthPanel({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
+  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy || !email.trim() || password.length < 8) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (mode === "sign-in") {
+        await signInWithPassword(email.trim(), password);
+        await onAuthenticated();
+      } else {
+        const result = await signUp(email.trim(), password);
+        if (result.needsConfirmation) {
+          setNotice("Check your email to confirm the account, then sign in.");
+        } else {
+          await onAuthenticated();
+        }
+      }
+    } catch (e: any) {
+      setError(e?.message || "Authentication could not be completed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="onb-wrap">
+      <div className="onb-card auth-card fade">
+        <span className="wordmark lg">PointsPilot</span>
+        <h2>{mode === "sign-in" ? "Sign in" : "Create your account"}</h2>
+        <p className="lead">Use an account to keep each wallet private and synced across devices.</p>
+
+        <Field label="Email" value={email} onChange={setEmail} type="email" />
+        <Field label="Password" value={password} onChange={setPassword} type="password" />
+
+        {error && <div className="auth-error">{error}</div>}
+        {notice && <div className="auth-notice">{notice}</div>}
+
+        <button className="btn btn-primary btn-lg" style={{ width: "100%", marginTop: 10 }} disabled={busy || !email.trim() || password.length < 8} onClick={submit}>
+          {busy ? <span className="spinner" /> : mode === "sign-in" ? "Sign in" : "Create account"}
+        </button>
+
+        <button className="btn btn-ghost auth-toggle" onClick={() => {
+          setMode((m) => m === "sign-in" ? "sign-up" : "sign-in");
+          setError(null);
+          setNotice(null);
+        }}>
+          {mode === "sign-in" ? "Need an account? Create one" : "Already have an account? Sign in"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /* ============================================================ Onboarding */
@@ -211,7 +352,7 @@ function CardPicker({ cards, setCards }: { cards: Card[]; setCards: (c: Card[]) 
       setCards([...cards, card]);
       setQ("");
     } catch (e: any) {
-      setErr(e?.message || "Lookup failed");
+      setErr(e?.message || "Card lookup could not be completed.");
     } finally {
       setBusy(false);
     }
@@ -242,7 +383,7 @@ function CardPicker({ cards, setCards }: { cards: Card[]; setCards: (c: Card[]) 
             onEdit={(patch) => { const next = [...cards]; next[i] = { ...c, ...patch }; setCards(next); }}
             onRemove={() => setCards(cards.filter((_, j) => j !== i))} />
         ))}
-        {!cards.length && <div className="muted" style={{ fontSize: 12, padding: 6 }}>No cards yet — add one or click <b>Seed demo</b>.</div>}
+        {!cards.length && <div className="muted" style={{ fontSize: 12, padding: 6 }}>No cards yet — search for a card above.</div>}
       </div>
     </>
   );
@@ -396,32 +537,56 @@ function CardEditor({ card, onEdit }: { card: Card; onEdit: (patch: Partial<Card
 
 /* ============================================================ Workspace */
 
-function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => void }) {
-  const [view, setView] = useState<View>("chat");
+function Workspace({
+  data,
+  setData,
+  authUser,
+  onSignedOut,
+}: {
+  data: AppData;
+  setData: (d: AppData) => void;
+  authUser: AuthUser | null;
+  onSignedOut: () => Promise<void>;
+}) {
+  const [view, setView] = useState<View>("everyday");
 
   const totalPoints = data.cards.reduce((s, c) => s + (c.points || 0), 0);
+  const annualSaved = estimateAnnualSaved(data.cards, data.uses, data.spend);
+  const confidence = sourceConfidence(data.cards);
+  const pageName =
+    view === "chat" ? "Chat"
+    : view === "everyday" ? "Everyday"
+    : view === "cards" ? "Wallet"
+    : view === "discover" ? "Get more"
+    : "Profile";
 
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="sb-head">
-          <div className="logo">P</div>
           <div>
-            <div className="ws"><span className="wordmark sm">PointsPilot</span></div>
-            <div className="ws-sub">{data.profile.name.split(" ")[0] || "you"}'s workspace</div>
+            <div className="ws"><span className="wordmark app-mark">PointsPilot</span></div>
+            <div className="ws-sub">AI checked the math. You stay in control.</div>
           </div>
         </div>
 
         <div className="sb-section">Workspace</div>
-        <SbItem icon="◐" label="Chat"     active={view === "chat"}     onClick={() => setView("chat")} />
-        <SbItem icon="□" label="My cards"  active={view === "cards"}    onClick={() => setView("cards")} />
-        <SbItem icon="✦" label="Get more"  active={view === "discover"} onClick={() => setView("discover")} />
-        <SbItem icon="○" label="Profile"  active={view === "profile"}  onClick={() => setView("profile")} />
+        {NAV_ITEMS.map((item) => (
+          <SbItem
+            key={item.view}
+            Icon={item.Icon}
+            label={item.label}
+            active={view === item.view}
+            onClick={() => setView(item.view)}
+          />
+        ))}
 
         <div className="sb-section">At a glance</div>
         <div className="sb-card">
           <div className="sb-stat-row"><span>Cards</span><span className="v">{data.cards.length}</span></div>
           <div className="sb-stat-row"><span>Points balance</span><span className="v gold">{totalPoints.toLocaleString()}</span></div>
+          <div className="sb-stat-row"><span>Saved with app</span><span className="v success">{formatMoney(annualSaved)}</span></div>
+          <div className="sb-stat-row"><span>AI confidence</span><span className="v">{confidence.label}</span></div>
           <div className="sb-stat-row"><span>Home airport</span><span className="v">{data.profile.airport || "—"}</span></div>
         </div>
 
@@ -430,12 +595,19 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
             <div className="avatar">{(data.profile.name[0] || "U").toUpperCase()}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="who" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.profile.name || "User"}</div>
-              <div className="who-sub" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.profile.email}</div>
+              <div className="who-sub" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{authUser?.email || data.profile.email}</div>
             </div>
           </div>
           <button className="btn btn-ghost" style={{ width: "100%", marginTop: 4, justifyContent: "flex-start" }}
-            onClick={() => { if (confirm("Reset profile?")) { localStorage.removeItem("pp_device"); location.reload(); } }}>
-            Reset profile
+            onClick={() => {
+              if (authUser) {
+                onSignedOut();
+              } else if (confirm("Reset local profile?")) {
+                clearLocalProfile();
+                location.reload();
+              }
+            }}>
+            {authUser ? "Sign out" : "Reset local profile"}
           </button>
         </div>
       </aside>
@@ -445,9 +617,14 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
           <div className="crumb">
             <span className="wordmark sm">PointsPilot</span>
             <span className="sep">/</span>
-            <span className="page-name">{view === "chat" ? "Chat" : view === "cards" ? "My cards" : view === "discover" ? "Get more" : "Profile"}</span>
+            <span className="page-name">{pageName}</span>
           </div>
           <div className="right">
+            <div className="saved-pill">
+              <span>Saved with app</span>
+              <b>{formatMoney(annualSaved)}</b>
+            </div>
+            <span className="tag violet">{confidence.sourceCount} sources</span>
             {view === "chat" && (
               <>
                 <span className="muted" style={{ fontSize: 12 }}>Ask anything</span>
@@ -457,7 +634,21 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
           </div>
         </div>
 
+        <nav className="mobile-tabbar" aria-label="Workspace views">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.view}
+              className={view === item.view ? "active" : ""}
+              onClick={() => setView(item.view)}
+            >
+              <item.Icon aria-hidden="true" size={15} strokeWidth={2.2} />
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
         {view === "chat" && <ChatView data={data} />}
+        {view === "everyday" && <EverydayView data={data} onOpenCards={() => setView("cards")} />}
         {view === "cards" && <CardsView data={data} setData={setData} />}
         {view === "discover" && <GapsView data={data} setData={setData} />}
         {view === "profile" && <ProfileView data={data} setData={setData} />}
@@ -466,12 +657,182 @@ function Workspace({ data, setData }: { data: AppData; setData: (d: AppData) => 
   );
 }
 
-function SbItem({ icon, label, active, onClick }: { icon: string; label: string; active?: boolean; onClick: () => void }) {
+function SbItem({ Icon, label, active, onClick }: { Icon: LucideIcon; label: string; active?: boolean; onClick: () => void }) {
   return (
     <button className={`sb-item ${active ? "active" : ""}`} onClick={onClick}>
-      <span className="icon">{icon}</span>
+      <span className="icon" aria-hidden="true">
+        <Icon size={16} strokeWidth={2.15} />
+      </span>
       <span>{label}</span>
     </button>
+  );
+}
+
+/* ============================================================ Everyday cockpit */
+
+function EverydayView({ data, onOpenCards }: { data: AppData; onOpenCards: () => void }) {
+  const initialCat = (data.uses[0] || "Dining").toLowerCase();
+  const [cat, setCat] = useState(EVERYDAY_CATEGORIES.includes(initialCat) ? initialCat : "dining");
+  const annualSpend = data.spend?.[cat];
+  const monthlySpend = annualSpend ? Math.round(annualSpend / 12) : 0;
+  const ranked = useMemo(() => bestForCategory(data.cards, cat, annualSpend), [data.cards, cat, annualSpend]);
+  const recommended = ranked[0];
+  const confidence = sourceConfidence(data.cards);
+  const annualSaved = estimateAnnualSaved(data.cards, data.uses, data.spend);
+
+  if (!data.cards.length) {
+    return (
+      <div className="content cockpit-content">
+        <div className="empty cockpit-empty">
+          <div className="big">Build your wallet first</div>
+          <div className="small">Add cards so AI can source rates and PointsPilot can rank them with deterministic math.</div>
+          <button className="btn btn-primary btn-lg" style={{ marginTop: 16 }} onClick={onOpenCards}>Open Wallet</button>
+        </div>
+      </div>
+    );
+  }
+
+  const rate = recommended ? rateFor(recommended, cat) : 0;
+  const valuePct = recommended ? recommended.value : 0;
+  const sourceCount = recommended?.sources?.length || 0;
+  const cap = recommended?.caps?.[cat];
+
+  return (
+    <div className="content cockpit-content">
+      <div className="cockpit-grid">
+        <aside className="cockpit-panel">
+          <div className="eyebrow">Category</div>
+          <h1 className="cockpit-title">Everyday spend</h1>
+          <div className="category-stack">
+            {EVERYDAY_CATEGORIES.map((c) => {
+              const categoryRanking = bestForCategory(data.cards, c, data.spend?.[c]);
+              const top = categoryRanking[0];
+              return (
+                <button key={c} className={`category-row ${cat === c ? "active" : ""}`} onClick={() => setCat(c)}>
+                  <span>{CAT_LABEL[c] || c}</span>
+                  <b>{top ? `${top.value.toFixed(1)}%` : "Add card"}</b>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="spend-impact">
+            <div className="eyebrow">Monthly spend</div>
+            <div className="money-row">
+              <strong>{monthlySpend ? formatMoney(monthlySpend) : "$0"}</strong>
+              <span>{CAT_LABEL[cat] || cat}</span>
+            </div>
+            <div className="mini-bar"><span style={{ width: `${Math.min(100, Math.max(12, monthlySpend / 20))}%` }} /></div>
+          </div>
+
+          <div className="saved-impact">
+            <div className="eyebrow">Money saved using PointsPilot</div>
+            <div className="saved-number">{formatMoney(annualSaved)}</div>
+            <p>Estimated this year versus using a generic 1.5% card for your tracked spend.</p>
+          </div>
+        </aside>
+
+        <main className="cockpit-main">
+          <section className="recommendation-hero">
+            <div>
+              <div className="eyebrow">Recommended card</div>
+              <h2>{recommended ? `Use ${recommended.name} for ${CAT_LABEL[cat] || cat}` : "Add a card to get ranked proof"}</h2>
+              {recommended && (
+                <p>
+                  {rate.toFixed(1)}x on {CAT_LABEL[cat] || cat} at {recommended.cpp.toFixed(2)} cents per point equals <b>{valuePct.toFixed(2)}% effective value</b>.
+                </p>
+              )}
+            </div>
+            <div className="hero-badges">
+              <span className="tag violet">{confidence.label}</span>
+              <span className="tag gold">{sourceCount || confidence.sourceCount} sources</span>
+              {cap && <span className="tag">Cap-aware</span>}
+            </div>
+          </section>
+
+          <section className="ranking-card">
+            <div className="ranking-head">
+              <h3>Full ranking</h3>
+              <span>Annual fee and caps included where available</span>
+            </div>
+            <div className="ranking-table">
+              <div className="ranking-line ranking-labels">
+                <span>Rank</span><span>Card</span><span>Value</span><span>Why</span><span>Risk</span>
+              </div>
+              {ranked.map((card, i) => {
+                const cardCap = card.caps?.[cat];
+                return (
+                  <div className="ranking-line" key={card.id}>
+                    <span className="rank-pill">{i + 1}</span>
+                    <span>
+                      <b>{card.name}</b>
+                      <small>{card.issuer}</small>
+                    </span>
+                    <span className="value-good">{card.value.toFixed(2)}%</span>
+                    <span>{rateFor(card, cat).toFixed(1)}x {CAT_LABEL[cat] || cat}</span>
+                    <span>{cardCap ? `Cap at ${formatMoney(cardCap.limit)}` : i === 0 ? "None" : "Lower upside"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </main>
+
+        <aside className="cockpit-rail">
+          <AIProofCard
+            title="AI checked the math"
+            body="AI detects merchant context and sources card data. PointsPilot ranks the wallet with TypeScript, so the model does not decide the winner."
+            meta={`${confidence.sourceCount} source${confidence.sourceCount === 1 ? "" : "s"} across ${data.cards.length} card${data.cards.length === 1 ? "" : "s"}`}
+          />
+
+          <section className="trust-card">
+            <div className="eyebrow">Trust panel</div>
+            <h3>{confidence.label}</h3>
+            <p>Rates, caps, annual fees, and edited fields stay visible so you can correct bad AI or web data.</p>
+            <div className="source-list">
+              <span>Sources checked <b>{confidence.sourceCount}</b></span>
+              <span>User-edited cards <b>{confidence.editedCards}</b></span>
+              <span>As-of dates <b>{confidence.sourcedCards}</b></span>
+            </div>
+          </section>
+
+          <section className="trust-card">
+            <div className="eyebrow">Fix the data</div>
+            <h3>Something wrong?</h3>
+            <p>Update rates, point value, category, annual fee, or caps. Edits stay protected from refreshes.</p>
+            <button className="btn btn-primary btn-lg" onClick={onOpenCards}>Update card data</button>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function AIProofCard({ title, body, meta }: { title: string; body: string; meta?: string }) {
+  return (
+    <section className="ai-card">
+      <span className="ai-kicker">AI layer</span>
+      <h3>{title}</h3>
+      <p>{body}</p>
+      {meta && <div className="ai-meta">{meta}</div>}
+    </section>
+  );
+}
+
+function AIPhaseRoadmap() {
+  return (
+    <div className="phase-grid">
+      {AI_PHASES.map((item) => (
+        <div className="phase-card" key={item.phase}>
+          <div className="phase-top">
+            <span>{item.phase}</span>
+            <b>{item.status}</b>
+          </div>
+          <h3>{item.title}</h3>
+          <p>{item.body}</p>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -610,7 +971,7 @@ function ChatView({ data }: { data: AppData }) {
         const merchantQuery = result.merchantQuery || v;
         const amount = typeof result.amount === "number" ? result.amount : null;
         if (!data.cards.length) {
-          push({ id: mkId(), from: "bot", kind: "text", text: "You haven't added any cards yet — open My cards in the sidebar to load demo cards or add your own, then ask again." });
+          push({ id: mkId(), from: "bot", kind: "text", text: "You haven't added any cards yet — open Wallet in the sidebar to add your cards, then ask again." });
         } else {
           const ack = ackFor(intent, amount);
           if (ack) push({ id: mkId(), from: "bot", kind: "text", text: ack });
@@ -634,8 +995,14 @@ function ChatView({ data }: { data: AppData }) {
         <div className="chat-inner">
           {msgs.length === 1 && (
             <div className="greeting fade">
-              <div className="hi">Hi {firstName} 👋</div>
-              <div className="sub">Tell me what you're buying or booking — I'll pick the right card.</div>
+              <div className="hi">Hi {firstName}</div>
+              <div className="sub">Ask naturally. AI reads the context, sources the data, and the math ranks your wallet.</div>
+              <div className="chat-ai-strip">
+                <span>Detect</span>
+                <span>Rank</span>
+                <span>Explain</span>
+                <span>Improve</span>
+              </div>
             </div>
           )}
           {msgs.map((m) => <MsgView key={m.id} m={m} data={data} onChip={answerTrip} />)}
@@ -755,6 +1122,7 @@ function RecCard({ category, query, data, amount }: { category: string; query: s
   const bestDollar = (rateFor(recommended, cat) * spend * recommended.cpp) / 100;
   const givenUp = bestDollar - dollarEarned;
   const cap = selected.caps?.[cat];
+  const selectedConfidence = sourceConfidence([selected]);
 
   return (
     <div className="rec fade">
@@ -773,6 +1141,21 @@ function RecCard({ category, query, data, amount }: { category: string; query: s
       <div className="why">
         <b>{rate.toFixed(1)}×</b> on {CAT_LABEL[cat] || "this"} · <span className="mono">{selected.cpp.toFixed(2)}¢/pt</span>
         {!isOverride && <span className="tag gold" style={{ marginLeft: 8 }}>our pick</span>}
+      </div>
+
+      <div className="ai-proof-grid">
+        <div>
+          <span>AI detected</span>
+          <b>{CAT_LABEL[cat] || "Everyday"}</b>
+        </div>
+        <div>
+          <span>Decision engine</span>
+          <b>Deterministic math</b>
+        </div>
+        <div>
+          <span>Data trust</span>
+          <b>{selectedConfidence.label}</b>
+        </div>
       </div>
 
       {merch?.note && (
@@ -1092,12 +1475,22 @@ function TripOption({ label, sub, pick, why, active, mode }:
 
       {active && (travelPerks.length > 0 || offer) && (
         <div className="trip-opt-perks">
-          {offer && <div className="trip-opt-offer">🎁 {offer}</div>}
+          {offer && (
+            <div className="trip-opt-offer">
+              <Gift aria-hidden="true" size={13} strokeWidth={2.2} />
+              <span>{offer}</span>
+            </div>
+          )}
           {travelPerks.length > 0 && (
             <>
               <div className="trip-opt-perks-title">Perks for this trip</div>
               <ul className="trip-opt-perks-list">
-                {travelPerks.slice(0, 4).map((p, i) => <li key={i}>{p}</li>)}
+                {travelPerks.slice(0, 4).map((p, i) => (
+                  <li key={i}>
+                    <Check aria-hidden="true" size={12} strokeWidth={2.4} />
+                    <span>{p}</span>
+                  </li>
+                ))}
               </ul>
             </>
           )}
@@ -1148,6 +1541,7 @@ function CardsView({ data, setData }: { data: AppData; setData: (d: AppData) => 
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const confidence = sourceConfidence(data.cards);
 
   async function add() {
     const query = q.trim();
@@ -1158,7 +1552,7 @@ function CardsView({ data, setData }: { data: AppData; setData: (d: AppData) => 
       const next = { ...data, cards: [...data.cards, card] };
       setData(next); await saveProfile(next); setQ("");
     } catch (e: any) {
-      setErr(e?.message || "Lookup failed");
+      setErr(e?.message || "Card lookup could not be completed.");
     } finally { setBusy(false); }
   }
 
@@ -1175,16 +1569,22 @@ function CardsView({ data, setData }: { data: AppData; setData: (d: AppData) => 
     <div className="content">
       <div className="page">
         <div className="page-head">
-          <h1>My cards</h1>
-          <p>Add cards by name — we pull live reward rates from the web with sources.</p>
+          <h1>Wallet</h1>
+          <p>Add cards by name. AI refreshes public reward data, then you can correct anything that looks wrong.</p>
         </div>
+
+        <AIProofCard
+          title="Refresh with AI"
+          body="Card lookup searches the live web, extracts rates, fees, caps, perks, and sources, then protects your manual edits from future refreshes."
+          meta={`${confidence.sourceCount} source${confidence.sourceCount === 1 ? "" : "s"} saved across your wallet`}
+        />
 
         <div className="row" style={{ marginBottom: 18, alignItems: "center" }}>
           <input className="input input-lg" style={{ flex: 1, maxWidth: 460 }}
             placeholder='Try "Amex Gold", "Chase Sapphire Reserve", "Target RedCard"'
             value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
           <button className="btn btn-primary btn-lg" onClick={add} disabled={busy || !q.trim()}>
-            {busy ? <span className="spinner" /> : "Add card"}
+            {busy ? <span className="spinner" /> : "Add with AI"}
           </button>
         </div>
 
@@ -1207,86 +1607,35 @@ function CardsView({ data, setData }: { data: AppData; setData: (d: AppData) => 
   );
 }
 
-/* ============================================================ Get more (gap analysis) */
+/* ============================================================ Live card discovery */
 
-function GapsView({ data, setData }: { data: AppData; setData: (d: AppData) => void }) {
-  const gaps = useMemo(() => analyzeWallet(data.cards, data.uses, data.spend), [data.cards, data.uses, data.spend]);
-  const [addingId, setAddingId] = useState<string | null>(null);
-
-  async function addCard(name: string, id: string) {
-    if (addingId) return;
-    setAddingId(id);
-    try {
-      const card = await aiCardLookup(name);
-      const next = { ...data, cards: [...data.cards, card] };
-      setData(next); await saveProfile(next);
-    } finally { setAddingId(null); }
-  }
+function GapsView({ data }: { data: AppData; setData: (d: AppData) => void }) {
+  const annualSaved = estimateAnnualSaved(data.cards, data.uses, data.spend);
 
   return (
     <div className="content">
       <div className="page">
         <div className="page-head">
-          <h1>Get more from your wallet</h1>
-          <p>Where a new card would beat what you already carry — fee-aware, in dollars. You decide; we just show the math.</p>
+          <h1>Live card discovery</h1>
+          <p>Production recommendations should come from current sourced lookup data, not a bundled list of card offers.</p>
         </div>
 
-        {!data.cards.length ? (
-          <div className="empty">
-            <div className="big">Add your cards first</div>
-            <div className="small">Once we know your wallet, this shows exactly where a new card would earn you more.</div>
-          </div>
-        ) : !gaps.length ? (
-          <div className="empty">
-            <div className="big">Your wallet already covers it</div>
-            <div className="small">No catalog card meaningfully beats your current best in the categories you picked.</div>
-          </div>
-        ) : (
-          <div className="col">
-            {gaps.map((g) => (
-              <GapCard key={g.category} gap={g} adding={addingId === g.suggestion.id} onAdd={() => addCard(g.suggestion.name, g.suggestion.id)} />
-            ))}
-          </div>
-        )}
+        <AIProofCard
+          title="No static card catalog"
+          body="PointsPilot now avoids static card recommendations. Add cards through Wallet so each rate, fee, cap, perk, and source comes from live lookup before it affects the math."
+          meta={`${formatMoney(annualSaved)} estimated already saved with your current wallet`}
+        />
 
-        <div className="muted" style={{ fontSize: 11, marginTop: 16 }}>
-          Suggestions come from a curated catalog of well-known cards, not live data. Adding one pulls its current live rates.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GapCard({ gap, adding, onAdd }: { gap: Gap; adding: boolean; onAdd: () => void }) {
-  const s = gap.suggestion;
-  return (
-    <div className="gap-card fade">
-      <div className="gap-head">
-        <span className="tag tag-cat" data-cat={gap.category}>{CAT_LABEL[gap.category] || gap.category}</span>
-        <span className="gap-delta">
-          +{gap.deltaPct.toFixed(2)}% back{gap.estAnnualGain ? ` · ~$${Math.round(gap.estAnnualGain).toLocaleString()}/yr` : ""}
-        </span>
-      </div>
-      <div className="gap-body">
-        <div className="gap-now">
-          <div className="gap-label">You carry</div>
-          <div className="gap-val">{gap.currentBestName ? `${gap.currentBestName} · ${gap.currentValuePct.toFixed(2)}%` : "No card for this"}</div>
-        </div>
-        <div className="gap-arrow">→</div>
-        <div className="gap-next">
-          <div className="swatch" style={{ background: s.color }} />
-          <div style={{ minWidth: 0 }}>
-            <div className="gap-name">{s.name}</div>
-            <div className="gap-sub">
-              {s.issuer} · {gap.suggestionRate.toFixed(1)}× · {gap.suggestionValuePct.toFixed(2)}% · {gap.annualFee ? `$${gap.annualFee}/yr` : "no fee"}
-            </div>
+        <div className="empty">
+          <div className="big">{data.cards.length ? "Use Wallet for live comparisons" : "Add your first card"}</div>
+          <div className="small">
+            Search a card by name in Wallet. Once it has sourced data, Everyday and Chat rank it against your real wallet without relying on static offers.
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
+            Next production step: build live card discovery with issuer/source filters, cache freshness, and compliance review before showing acquisition suggestions.
           </div>
         </div>
       </div>
-      {gap.offer && <div className="offer-pill" style={{ marginTop: 10 }}>{gap.offer}</div>}
-      <button className="btn btn-primary btn-lg" style={{ marginTop: 10 }} onClick={onAdd} disabled={adding}>
-        {adding ? <span className="spinner" /> : "Add to my cards"}
-      </button>
     </div>
   );
 }
@@ -1311,6 +1660,14 @@ function ProfileView({ data, setData }: { data: AppData; setData: (d: AppData) =
         </div>
 
         <SpendEditor data={data} setData={setData} />
+
+        <div className="card phase-section">
+          <div className="bd-title" style={{ marginBottom: 8 }}>AI rollout phases</div>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 14 }}>
+            AI is added where it earns trust: detecting, sourcing, explaining, refreshing, and personalizing.
+          </p>
+          <AIPhaseRoadmap />
+        </div>
       </div>
     </div>
   );
@@ -1323,6 +1680,7 @@ function SpendEditor({ data, setData }: { data: AppData; setData: (d: AppData) =
   const cats = data.uses.length
     ? data.uses.map((u) => u.toLowerCase()).filter((c) => c !== "other")
     : ["dining", "groceries", "travel", "gas"];
+  const annualSaved = estimateAnnualSaved(data.cards, data.uses, data.spend);
 
   async function setMonthly(cat: string, monthly: number) {
     const spend = { ...(data.spend || {}) };
@@ -1354,15 +1712,20 @@ function SpendEditor({ data, setData }: { data: AppData; setData: (d: AppData) =
           );
         })}
       </div>
+      <div className="saved-impact profile-savings">
+        <div className="eyebrow">Money saved using PointsPilot</div>
+        <div className="saved-number">{formatMoney(annualSaved)}</div>
+        <p>Estimated annual lift from applying your wallet rankings to the monthly spend above.</p>
+      </div>
     </div>
   );
 }
 
 function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   return (
-    <div className="flex" style={{ padding: "10px 0", borderBottom: "1px solid var(--border)", justifyContent: "space-between", gap: 12 }}>
-      <span className="muted" style={{ fontSize: 13 }}>{k}</span>
-      <span style={{ fontSize: 13, color: "var(--fg-0)", textAlign: "right" }} className={mono ? "mono" : ""}>{v || "—"}</span>
+    <div className="profile-row">
+      <span className="profile-row-label">{k}</span>
+      <span className={`profile-row-value ${mono ? "mono" : ""}`}>{v || "—"}</span>
     </div>
   );
 }
