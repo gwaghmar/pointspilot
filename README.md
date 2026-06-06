@@ -15,23 +15,14 @@ The trick: an LLM by itself doesn't know *current* reward rates and will halluci
 
 ```mermaid
 flowchart LR
-    User([User]):::user --> Next[Next.js 16<br/>App Router<br/>React 18 + TS]:::frontend
-    Next -->|/api/ai| API[Server Route<br/>app/api/ai/route.ts]:::api
-    API --> Tavily[Tavily<br/>Live Web Search]:::search
-    API --> LLM[OpenRouter<br/>gpt-4o-mini<br/>JSON extraction]:::ai
-    API --> Supa[(Supabase<br/>Postgres cache<br/>+ profile)]:::db
-    API --> Rec[lib/recommend.ts<br/>deterministic math]:::logic
+    User["User"] --> Next["Next.js 16 / App Router / React 18 + TypeScript"]
+    Next -->|"/api/ai"| API["Server route: app/api/ai/route.ts"]
+    API --> Tavily["Tavily live web search"]
+    API --> LLM["OpenRouter gpt-4o-mini JSON extraction"]
+    API --> Supa["Supabase Postgres cache and profile"]
+    API --> Rec["lib/recommend.ts deterministic math"]
     Rec --> Next
-    Next -.deployed on.-> Vercel[[Vercel]]:::host
-
-    classDef user fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#1f2937
-    classDef frontend fill:#bae6fd,stroke:#0369a1,stroke-width:2px,color:#0c4a6e
-    classDef api fill:#ddd6fe,stroke:#6d28d9,stroke-width:2px,color:#3b0764
-    classDef search fill:#fecaca,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
-    classDef ai fill:#bbf7d0,stroke:#15803d,stroke-width:2px,color:#14532d
-    classDef db fill:#a7f3d0,stroke:#047857,stroke-width:2px,color:#064e3b
-    classDef logic fill:#fbcfe8,stroke:#be185d,stroke-width:2px,color:#831843
-    classDef host fill:#1f2937,stroke:#fbbf24,stroke-width:2px,color:#fbbf24
+    Next --> Vercel["Vercel deploy"]
 ```
 
 | Layer | Tool | Why |
