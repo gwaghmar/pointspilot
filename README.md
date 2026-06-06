@@ -13,17 +13,7 @@ The trick: an LLM by itself doesn't know *current* reward rates and will halluci
 
 ## Tech stack
 
-```mermaid
-flowchart LR
-    User[User] --> App[Next app]
-    App --> Api[AI route]
-    Api --> Search[Tavily search]
-    Api --> Model[OpenRouter model]
-    Api --> Data[Supabase data]
-    Api --> Math[Reward math]
-    Math --> App
-    App --> Host[Vercel]
-```
+![PointsPilot tech stack diagram](docs/assets/tech-stack.png)
 
 | Layer | Tool | Why |
 |---|---|---|

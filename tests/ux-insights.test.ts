@@ -34,22 +34,15 @@ const cssSource = readFileSync("app/globals.css", "utf8");
 const readmeSource = readFileSync("README.md", "utf8");
 const decorativeGlyphs = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{25A0}-\u{25FF}]/u;
 const productionSources = [appSource, landingSource, aiSource, schemaSource].join("\n");
-const readmeMermaidBlocks = [...readmeSource.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map((match) => match[1]);
+const techStackPng = "docs/assets/tech-stack.png";
 
 assert.equal(decorativeGlyphs.test(appSource), false, "App source should use Lucide icons, not emoji glyphs");
 assert.equal(decorativeGlyphs.test(landingSource), false, "Landing source should not contain emoji glyphs");
 assert.equal(decorativeGlyphs.test(cssSource), false, "CSS should not render emoji glyphs");
-assert.equal(readmeMermaidBlocks.length, 1, "README should keep one GitHub-rendered Mermaid tech-stack diagram");
-assert.doesNotMatch(
-  readmeMermaidBlocks.join("\n"),
-  /<br\s*\/?>|:::[A-Za-z0-9_-]+|^\s*classDef\b/m,
-  "README Mermaid must use GitHub-safe labels without HTML breaks or inline class shorthand",
-);
-assert.doesNotMatch(
-  readmeMermaidBlocks.join("\n"),
-  /["|]/,
-  "README Mermaid should stay minimal for GitHub rendering: no quoted labels or edge-label pipes",
-);
+assert.doesNotMatch(readmeSource, /```mermaid/, "README should use a committed PNG diagram instead of GitHub-rendered Mermaid");
+assert.match(readmeSource, /!\[PointsPilot tech stack diagram\]\(docs\/assets\/tech-stack\.png\)/);
+assert.equal(existsSync(techStackPng), true, "README tech-stack PNG must be committed");
+assert.equal(readFileSync(techStackPng).subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "Tech-stack asset must be a PNG file");
 assert.doesNotMatch(productionSources, /\b(demo|seed demo|open beta|while we're cooking|No auth for MVP|disable row level security|browser-local profile)\b/i);
 assert.doesNotMatch(aiSource, /issuer:\s*"Card"|Lookup failed|rewards:\s*\{\}/);
 assert.doesNotMatch(gapsSource, /CATALOG|\.\/catalog/);
