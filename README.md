@@ -15,14 +15,14 @@ The trick: an LLM by itself doesn't know *current* reward rates and will halluci
 
 ```mermaid
 flowchart LR
-    User["User"] --> Next["Next.js 16 / App Router / React 18 + TypeScript"]
-    Next -->|"/api/ai"| API["Server route: app/api/ai/route.ts"]
-    API --> Tavily["Tavily live web search"]
-    API --> LLM["OpenRouter gpt-4o-mini JSON extraction"]
-    API --> Supa["Supabase Postgres cache and profile"]
-    API --> Rec["lib/recommend.ts deterministic math"]
-    Rec --> Next
-    Next --> Vercel["Vercel deploy"]
+    User[User] --> App[Next app]
+    App --> Api[AI route]
+    Api --> Search[Tavily search]
+    Api --> Model[OpenRouter model]
+    Api --> Data[Supabase data]
+    Api --> Math[Reward math]
+    Math --> App
+    App --> Host[Vercel]
 ```
 
 | Layer | Tool | Why |

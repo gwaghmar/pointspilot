@@ -45,6 +45,11 @@ assert.doesNotMatch(
   /<br\s*\/?>|:::[A-Za-z0-9_-]+|^\s*classDef\b/m,
   "README Mermaid must use GitHub-safe labels without HTML breaks or inline class shorthand",
 );
+assert.doesNotMatch(
+  readmeMermaidBlocks.join("\n"),
+  /["|]/,
+  "README Mermaid should stay minimal for GitHub rendering: no quoted labels or edge-label pipes",
+);
 assert.doesNotMatch(productionSources, /\b(demo|seed demo|open beta|while we're cooking|No auth for MVP|disable row level security|browser-local profile)\b/i);
 assert.doesNotMatch(aiSource, /issuer:\s*"Card"|Lookup failed|rewards:\s*\{\}/);
 assert.doesNotMatch(gapsSource, /CATALOG|\.\/catalog/);
