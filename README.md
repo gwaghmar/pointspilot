@@ -84,7 +84,7 @@ npm install
 |---|---|---|
 | **OpenRouter** ([keys](https://openrouter.ai/keys)) | Create an API key | Pay-per-token, gpt-4o-mini is ~cents |
 | **Tavily** ([tavily.com](https://tavily.com)) | Sign up, copy the API key | 1,000 searches/month |
-| **Supabase** ([supabase.com](https://supabase.com)) | New project → SQL editor → paste `supabase/schema.sql` → run | Generous free tier |
+| **Supabase** ([supabase.com](https://supabase.com)) | New project → SQL editor → paste `supabase/schema.sql` → run. For instant sign-in, turn **off** email confirmation: Authentication → Sign In / Providers → Email → disable **Confirm email** | Generous free tier |
 
 ### 3. Configure env
 
