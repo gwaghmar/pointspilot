@@ -864,13 +864,60 @@ a:hover { color: var(--accent-hover); }
 /* ═════════════════════════════ Onboarding ═════════════════════════════ */
 
 .onb-wrap {
-  height: 100vh;
+  min-height: 100vh;
   display: grid; place-items: center;
+  position: relative;
+  overflow: hidden;
   background:
     radial-gradient(900px 480px at 18% 0%, rgba(31, 95, 224, 0.10), transparent 60%),
     radial-gradient(900px 500px at 100% 100%, rgba(217, 167, 89, 0.10), transparent 60%),
     linear-gradient(180deg, #fafbfd 0%, #f3f4f8 100%);
   padding: 20px;
+}
+.onb-wrap > .onb-card { position: relative; z-index: 1; }
+
+/* Playful drifting reward bits behind the card */
+.mkt-backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.mkt-bit {
+  position: absolute;
+  font-size: 13px; font-weight: 600;
+  color: var(--accent);
+  background: rgba(255,255,255,0.7);
+  border: 1px solid var(--accent-border, rgba(31,95,224,0.18));
+  border-radius: 999px;
+  padding: 5px 12px;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(31,95,224,0.08);
+  opacity: 0;
+  animation: mktFloat 16s ease-in-out infinite;
+  backdrop-filter: blur(2px);
+}
+.mkt-bit-1, .mkt-bit-4 { color: var(--gold-text, #9c7b3c); border-color: rgba(217,167,89,0.3); box-shadow: 0 6px 18px rgba(217,167,89,0.10); }
+.mkt-bit:nth-child(1)  { top: 12%;  left: 8%;   animation-delay: 0s;    }
+.mkt-bit:nth-child(2)  { top: 22%;  left: 78%;  animation-delay: -2s;   }
+.mkt-bit:nth-child(3)  { top: 70%;  left: 12%;  animation-delay: -4s;   }
+.mkt-bit:nth-child(4)  { top: 82%;  left: 72%;  animation-delay: -6s;   }
+.mkt-bit:nth-child(5)  { top: 38%;  left: 4%;   animation-delay: -8s;   }
+.mkt-bit:nth-child(6)  { top: 8%;   left: 46%;  animation-delay: -10s;  }
+.mkt-bit:nth-child(7)  { top: 58%;  left: 84%;  animation-delay: -12s;  }
+.mkt-bit:nth-child(8)  { top: 90%;  left: 30%;  animation-delay: -3s;   }
+.mkt-bit:nth-child(9)  { top: 48%;  left: 88%;  animation-delay: -7s;   }
+.mkt-bit:nth-child(10) { top: 30%;  left: 26%;  animation-delay: -11s;  }
+.mkt-bit:nth-child(11) { top: 64%;  left: 48%;  animation-delay: -5s;   }
+.mkt-bit:nth-child(12) { top: 16%;  left: 64%;  animation-delay: -9s;   }
+@keyframes mktFloat {
+  0%   { opacity: 0;    transform: translateY(14px) scale(0.96); }
+  18%  { opacity: 0.85; }
+  50%  { opacity: 0.85; transform: translateY(-10px) scale(1); }
+  82%  { opacity: 0.85; }
+  100% { opacity: 0;    transform: translateY(14px) scale(0.96); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mkt-bit { animation: none; opacity: 0.7; }
+}
+@media (max-width: 600px) {
+  .mkt-bit:nth-child(n+7) { display: none; }
+  .mkt-bit { font-size: 11px; padding: 4px 9px; }
 }
 .onb-card {
   width: 100%; max-width: 560px;
@@ -925,7 +972,7 @@ a:hover { color: var(--accent-hover); }
 
 .card-tile {
   display: grid;
-  grid-template-columns: 44px 1fr auto auto;
+  grid-template-columns: 92px 1fr auto auto;
   align-items: center;
   gap: 14px;
   padding: 12px 14px;
@@ -936,20 +983,60 @@ a:hover { color: var(--accent-hover); }
   transition: border-color .1s, box-shadow .1s, transform .05s;
 }
 .card-tile:hover { border-color: var(--border-strong); box-shadow: var(--shadow-2); }
-.card-tile .swatch {
-  width: 44px; height: 30px; border-radius: 5px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -1px 0 rgba(0,0,0,0.15);
-  background-image: linear-gradient(135deg, rgba(255,255,255,0.18) 0%, transparent 50%);
-  background-blend-mode: overlay;
+/* ───────── Card art (real image or rendered card face) ───────── */
+.card-art {
   position: relative;
+  display: inline-block;
+  border-radius: 7px;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.18);
+  color: #fff;
+  user-select: none;
 }
-.card-tile .swatch::after {
-  content: "";
+.card-art-md { width: 92px; height: 58px; }
+.card-art-sm { width: 40px; height: 26px; border-radius: 5px; }
+.card-art-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-art.ink-dark { color: #1a1f29; }
+
+/* sheen + chip + text for the rendered face */
+.card-art .ca-sheen {
   position: absolute; inset: 0;
-  border-radius: 5px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.22), transparent 60%);
+  background: linear-gradient(135deg, rgba(255,255,255,0.28) 0%, transparent 42%, rgba(0,0,0,0.10) 100%);
   pointer-events: none;
 }
+.card-art .ca-chip {
+  position: absolute; top: 9px; left: 9px;
+  width: 13px; height: 10px; border-radius: 2.5px;
+  background: linear-gradient(135deg, #f3e3a8, #c9a84a);
+  box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.25);
+}
+.card-art .ca-chip::after {
+  content: ""; position: absolute; inset: 2px 4px;
+  border-left: 0.5px solid rgba(0,0,0,0.25); border-right: 0.5px solid rgba(0,0,0,0.25);
+}
+.card-art .ca-net {
+  position: absolute; top: 8px; right: 9px;
+  font-size: 8px; font-weight: 800; letter-spacing: 0.06em;
+  opacity: 0.92; font-family: var(--font-mono);
+}
+.card-art .ca-issuer {
+  position: absolute; left: 9px; bottom: 21px;
+  font-size: 7.5px; font-weight: 600; letter-spacing: 0.03em;
+  text-transform: uppercase; opacity: 0.85;
+  max-width: 74px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.card-art .ca-name {
+  position: absolute; left: 9px; right: 9px; bottom: 11px;
+  font-size: 8.5px; font-weight: 700; line-height: 1.05;
+  max-width: 74px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.card-art .ca-digits {
+  position: absolute; left: 9px; bottom: 3px;
+  font-size: 7px; letter-spacing: 0.12em; opacity: 0.8; font-family: var(--font-mono);
+}
+.card-art-sm .ca-chip { top: 5px; left: 5px; width: 8px; height: 6px; }
+.card-art-sm .ca-net { top: 4px; right: 5px; font-size: 5.5px; }
 .card-tile .meta { min-width: 0; }
 .card-tile .name { font-size: 13.5px; font-weight: 600; color: var(--fg-0); }
 .card-tile .sub  { font-size: 11.5px; color: var(--fg-2); margin-top: 2px; }
@@ -1414,7 +1501,7 @@ a:hover { color: var(--accent-hover); }
   }
 
   .card-tile {
-    grid-template-columns: 44px minmax(0, 1fr) auto;
+    grid-template-columns: 92px minmax(0, 1fr) auto;
   }
 
   .card-tile .remove {
@@ -1653,14 +1740,14 @@ a:hover { color: var(--accent-hover); }
   }
 
   .card-tile {
-    grid-template-columns: 38px minmax(0, 1fr) 28px;
+    grid-template-columns: 78px minmax(0, 1fr) 28px;
     gap: 10px;
     padding: 12px;
   }
 
-  .card-tile .swatch {
-    width: 38px;
-    height: 26px;
+  .card-tile .card-art-md {
+    width: 78px;
+    height: 49px;
   }
 
   .card-tile .bal {

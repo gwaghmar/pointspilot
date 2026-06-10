@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { aiClassify, aiCardLookup, aiAnalyze, aiNearby, type NearbyPlace, type NearbyResult } from "@/lib/ai";
+import { cardArtUrl, cardNetwork, cardFace } from "@/lib/cardArt";
 import { bestForCategory, bestForTrip, rateFor, ceilingFor, type Card } from "@/lib/recommend";
 import { resolveMerchant } from "@/lib/merchants";
 import { buildReservationUrl } from "@/lib/reservations";
@@ -29,7 +30,36 @@ import {
   type AuthUser,
 } from "@/lib/supabase";
 
-type Profile = { name: string; email: string; phone: string; address: string; airport: string };
+type Profile = { name: string; email: string; phone?: string; address: string; airport: string };
+
+/* Best-effort first/last name from the email the user signed up with — strip
+ * digits, split on separators, title-case. Prefilled but fully editable. */
+function nameFromEmail(email: string): string {
+  const local = (email.split("@")[0] || "").replace(/\d+/g, " ");
+  return local
+    .split(/[._\-+]+/)
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(" ")
+    .trim();
+}
+
+/* Playful reward-y bits that drift in the background of the onboarding/auth
+ * screens — pure decoration. */
+const BACKDROP_BITS = [
+  "4× dining", "✈️ 5× travel", "$0 annual fee", "🛒 6% groceries", "2% on everything",
+  "points ≈ cash", "best card, every swipe", "⛽ 3× gas", "🛋️ lounge access", "no foreign fees",
+  "💳 the right card, always", "🏨 free night certs",
+];
+function MarketingBackdrop() {
+  return (
+    <div className="mkt-backdrop" aria-hidden="true">
+      {BACKDROP_BITS.map((b, i) => (
+        <span key={i} className={`mkt-bit mkt-bit-${i % 6}`}>{b}</span>
+      ))}
+    </div>
+  );
+}
 type AppData = { profile: Profile; cards: Card[]; uses: string[]; spend?: Record<string, number> };
 
 const USE_OPTIONS = ["Travel", "Groceries", "Dining", "Streaming", "Gas", "Online", "Other"];
@@ -147,7 +177,7 @@ export default function Page() {
   }
 
   if (!data) {
-    return <Onboarding onDone={async (d) => { await saveProfile(d); setData(d); }} />;
+    return <Onboarding signupEmail={authUser?.email ?? ""} onDone={async (d) => { await saveProfile(d); setData(d); }} />;
   }
   return <Workspace data={data} setData={setData} authUser={authUser} onSignedOut={async () => {
     await signOut();
@@ -191,6 +221,7 @@ function AuthPanel({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
 
   return (
     <div className="onb-wrap">
+      <MarketingBackdrop />
       <div className="onb-card auth-card fade">
         <span className="wordmark lg">PointsPilot</span>
         <h2>{mode === "sign-in" ? "Sign in" : "Create your account"}</h2>
@@ -220,15 +251,17 @@ function AuthPanel({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
 
 /* ============================================================ Onboarding */
 
-function Onboarding({ onDone }: { onDone: (d: AppData) => void }) {
+function Onboarding({ onDone, signupEmail = "" }: { onDone: (d: AppData) => void; signupEmail?: string }) {
   const [step, setStep] = useState(0);
-  const [profile, setProfile] = useState<Profile>({ name: "", email: "", phone: "", address: "", airport: "" });
+  const [profile, setProfile] = useState<Profile>({
+    name: nameFromEmail(signupEmail), email: signupEmail, address: "", airport: "",
+  });
   const [cards, setCards] = useState<Card[]>([]);
   const [uses, setUses] = useState<string[]>([]);
   const [spend, setSpend] = useState<Record<string, number>>({});
 
   const canNext =
-    (step === 0 && profile.name && profile.email && profile.phone) ||
+    (step === 0 && profile.name && profile.email) ||
     (step === 1 && profile.address && profile.airport) ||
     (step === 2 && cards.length > 0) ||
     (step === 3 && uses.length > 0) ||
@@ -238,6 +271,7 @@ function Onboarding({ onDone }: { onDone: (d: AppData) => void }) {
 
   return (
     <div className="onb-wrap">
+      <MarketingBackdrop />
       <div className="onb-card fade">
         <div className="onb-steps">
           {[0, 1, 2, 3, 4].map((i) => <div key={i} className={`onb-step ${i <= step ? "on" : ""}`} />)}
@@ -246,10 +280,9 @@ function Onboarding({ onDone }: { onDone: (d: AppData) => void }) {
         {step === 0 && (
           <>
             <h2>Welcome to PointsPilot</h2>
-            <p className="lead">Tell us a bit about you. We'll never use this for anything other than pre-filling handoffs.</p>
+            <p className="lead">We pulled these from your sign-in — edit anything that's off. Only used to pre-fill handoffs.</p>
             <Field label="Full name" value={profile.name}  onChange={(v) => setProfile({ ...profile, name: v })} />
             <Field label="Email"     value={profile.email} onChange={(v) => setProfile({ ...profile, email: v })} type="email" />
-            <Field label="Phone"     value={profile.phone} onChange={(v) => setProfile({ ...profile, phone: v })} type="tel" />
           </>
         )}
 
@@ -389,6 +422,46 @@ function CardPicker({ cards, setCards }: { cards: Card[]; setCards: (c: Card[]) 
   );
 }
 
+/* Visual card front. Uses a real image when one is registered (lib/cardArt.ts),
+ * otherwise renders a faithful card face — issuer gradient, network badge, EMV
+ * chip, name. Falls back to the render if a registered image fails to load, so
+ * a broken <img> is never shown. `size` controls the small inline variants. */
+const NETWORK_LABEL: Record<string, string> = { amex: "AMEX", visa: "VISA", mastercard: "MC", discover: "DISCOVER" };
+function CardArt({ card, size = "md" }: { card: Card; size?: "sm" | "md" }) {
+  const url = cardArtUrl(card.name);
+  const [imgOk, setImgOk] = useState(Boolean(url));
+  const face = cardFace(card.name, card.issuer, card.color);
+  const net = cardNetwork(card.name, card.issuer);
+
+  if (url && imgOk) {
+    return (
+      <span className={`card-art card-art-${size} card-art-img`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={card.name} onError={() => setImgOk(false)} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`card-art card-art-${size} card-art-render ink-${face.ink}`}
+      style={{ backgroundImage: `linear-gradient(135deg, ${face.from} 0%, ${face.to} 100%)` }}
+      aria-label={card.name}
+    >
+      <span className="ca-sheen" />
+      <span className="ca-chip" />
+      {net && <span className="ca-net">{NETWORK_LABEL[net]}</span>}
+      {size === "md" && (
+        <>
+          <span className="ca-issuer">{card.issuer}</span>
+          <span className="ca-name">{card.name}</span>
+          <span className="ca-digits">•••• ••••</span>
+        </>
+      )}
+    </span>
+  );
+}
+
 function CardTile({ card, onBalance, onRemove, onEdit, expanded = true }: { card: Card; onBalance: (n: number) => void; onRemove: () => void; onEdit?: (patch: Partial<Card>) => void; expanded?: boolean }) {
   const [editing, setEditing] = useState(false);
   const { sources, asOf, perks, offer, redemptions } = card;
@@ -408,7 +481,7 @@ function CardTile({ card, onBalance, onRemove, onEdit, expanded = true }: { card
   return (
     <div className="card-tile-wrap fade">
       <div className="card-tile">
-        <div className="swatch" style={{ background: card.color }} />
+        <CardArt card={card} />
         <div className="meta">
           <div className="name">
             {card.name}
@@ -1190,7 +1263,7 @@ function RecCard({ category, query, data, amount }: { category: string; query: s
           const cCap = c.caps?.[cat];
           return (
             <button key={c.id} className={`pick-row ${chosen ? "chosen" : ""}`} onClick={() => setSelectedId(c.id)}>
-              <span className="swatch" style={{ background: c.color }} />
+              <CardArt card={c} size="sm" />
               <span className="pick-meta">
                 <span className="pick-name">
                   {c.name}
@@ -1445,7 +1518,7 @@ function TripOption({ label, sub, pick, why, active, mode }:
         {active && <span className="tag gold">your pick</span>}
       </div>
       <div className="trip-opt-card">
-        <div className="swatch" style={{ background: pick.color, width: 36, height: 24, borderRadius: 4, flexShrink: 0 }} />
+        <CardArt card={pick} size="sm" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 13.5 }}>{pick.name}</div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{pick.issuer} · {pick.cur}</div>
@@ -1653,7 +1726,6 @@ function ProfileView({ data, setData }: { data: AppData; setData: (d: AppData) =
         <div className="card">
           <Row k="Name"    v={data.profile.name} />
           <Row k="Email"   v={data.profile.email} />
-          <Row k="Phone"   v={data.profile.phone} />
           <Row k="Address" v={data.profile.address} />
           <Row k="Home airport" v={data.profile.airport} mono />
           <Row k="Use cases" v={data.uses.join(", ")} />
